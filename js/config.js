@@ -10,7 +10,7 @@ var GOOGLE_MAPS_KEY = 'AIzaSyDMislL1G9v0eMfJmirtKk5aQM_9wLZKrE';
 
 // 3) ID de mapa (Google Cloud → Google Maps Platform → Administración de mapas).
 //    'DEMO_MAP_ID' sirve para pruebas; luego reemplácelo por el suyo.
-var GOOGLE_MAP_ID = 'JD MAP';
+var GOOGLE_MAP_ID = 'JDMAP';
 
 var APP_NOMBRE = 'Red de Patrullaje';
 var INSTITUCION = 'Policía Nacional';
