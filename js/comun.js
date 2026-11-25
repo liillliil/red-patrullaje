@@ -68,3 +68,107 @@ document.addEventListener('DOMContentLoaded', function () {
   $$('[data-app-nombre]').forEach(function (e) { e.textContent = APP_NOMBRE; });
   $$('[data-institucion]').forEach(function (e) { e.textContent = INSTITUCION; });
 });
+
+/* =====================================================================
+ *  GOOGLE MAPS - carga y ayudas para dibujar
+ * ===================================================================== */
+var _gmCarga = null;
+
+function cargarGoogleMaps() {
+  if (window.google && google.maps && google.maps.marker) return Promise.resolve();
+  if (_gmCarga) return _gmCarga;
+  _gmCarga = new Promise(function (res, rej) {
+    if (!GOOGLE_MAPS_KEY || GOOGLE_MAPS_KEY.indexOf('PEGUE_AQUI') > -1) { _gmCarga = null; rej(new Error('Configure GOOGLE_MAPS_KEY en js/config.js')); return; }
+    window.__gmListo = function () { res(); };
+    window.gm_authFailure = function () {
+      toast('Google Maps rechazó la clave. Revise: clave correcta, "Maps JavaScript API" habilitada, facturación activa y que la restricción de sitios incluya esta dirección.', 'err', 15000);
+    };
+    var s = document.createElement('script');
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GOOGLE_MAPS_KEY) +
+      '&v=weekly&libraries=marker&language=es&region=EC&loading=async&callback=__gmListo';
+    s.async = true;
+    s.onerror = function () { _gmCarga = null; rej(new Error('No se pudo cargar Google Maps. Verifique su conexión.')); };
+    document.head.appendChild(s);
+  });
+  return _gmCarga;
+}
+
+/** Crea un mapa de Google en el elemento (calles, satélite, híbrido, relieve y Street View) */
+async function gmMapa(el, opciones) {
+  await cargarGoogleMaps();
+  var m = new google.maps.Map(el, Object.assign({
+    center: { lat: -1.83, lng: -78.18 }, zoom: 7,
+    mapId: GOOGLE_MAP_ID || 'DEMO_MAP_ID',
+    mapTypeId: 'roadmap',
+    mapTypeControl: true,
+    mapTypeControlOptions: { mapTypeIds: ['roadmap', 'satellite', 'hybrid', 'terrain'], style: google.maps.MapTypeControlStyle.DROPDOWN_MENU },
+    streetViewControl: true, fullscreenControl: true, scaleControl: true,
+    gestureHandling: 'greedy', clickableIcons: false
+  }, opciones || {}));
+  m.__info = new google.maps.InfoWindow();
+  return m;
+}
+
+/** Grupo de elementos que se muestran/ocultan juntos (una "capa") */
+function Capa() { this.items = []; this.map = null; }
+Capa.prototype.add = function (o) { this.items.push(o); if (this.map) gmSetMap(o, this.map); return o; };
+Capa.prototype.setMap = function (m) { var self = this; this.map = m; this.items.forEach(function (o) { gmSetMap(o, m); }); return self; };
+function gmSetMap(o, m) { if (typeof o.setMap === 'function') o.setMap(m); else o.map = m; }
+
+function gmPopup(map, marker, html) {
+  if (!html) return;
+  marker.addListener('click', function () { map.__info.setContent(html); map.__info.open({ map: map, anchor: marker }); });
+}
+
+/** Marcador redondo con número (orden) */
+function gmNum(map, lat, lng, n, color, html, titulo) {
+  var d = document.createElement('div');
+  d.className = 'gm-num'; d.style.background = color; d.textContent = n;
+  var mk = new google.maps.marker.AdvancedMarkerElement({ position: { lat: Number(lat), lng: Number(lng) }, content: d, title: titulo || '' });
+  gmPopup(map, mk, html);
+  return mk;
+}
+
+/** Punto pequeño */
+function gmPunto(map, lat, lng, relleno, tam, titulo, html, borde) {
+  var d = document.createElement('div');
+  d.className = 'gm-dot';
+  d.style.width = d.style.height = tam + 'px';
+  d.style.background = relleno; d.style.borderColor = borde || '#fff';
+  var mk = new google.maps.marker.AdvancedMarkerElement({ position: { lat: Number(lat), lng: Number(lng) }, content: d, title: titulo || '' });
+  gmPopup(map, mk, html);
+  return mk;
+}
+
+/** Círculo de cobertura (radio en metros) */
+function gmCirculo(lat, lng, radio, color, opacidad) {
+  return new google.maps.Circle({
+    center: { lat: Number(lat), lng: Number(lng) }, radius: Number(radio), clickable: false,
+    strokeColor: color, strokeOpacity: .9, strokeWeight: 1.5, fillColor: color, fillOpacity: opacidad == null ? .3 : opacidad
+  });
+}
+
+/** Línea de ruta; opcionalmente punteada y con flechas de dirección */
+function gmLinea(path, color, peso, punteada, flechas) {
+  var icons = [];
+  if (punteada) icons.push({ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: color, scale: peso }, offset: '0', repeat: (peso * 5) + 'px' });
+  if (flechas) icons.push({ icon: { path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3, strokeColor: color, fillColor: color, fillOpacity: 1 }, offset: '50%', repeat: '140px' });
+  return new google.maps.Polyline({
+    path: path.map(function (p) { return { lat: Number(p[0]), lng: Number(p[1]) }; }),
+    strokeColor: color, strokeOpacity: punteada ? 0 : .85, strokeWeight: peso, icons: icons, clickable: false
+  });
+}
+
+/** Encuadra el mapa en los puntos [[lat,lng],...] */
+function gmAjustar(map, pts, maxZoom) {
+  maxZoom = maxZoom || 18;
+  if (!pts.length) return;
+  if (pts.length === 1) { map.setCenter({ lat: Number(pts[0][0]), lng: Number(pts[0][1]) }); map.setZoom(maxZoom); return; }
+  var b = new google.maps.LatLngBounds();
+  pts.forEach(function (p) { b.extend({ lat: Number(p[0]), lng: Number(p[1]) }); });
+  map.fitBounds(b, 50);
+  google.maps.event.addListenerOnce(map, 'idle', function () { if (map.getZoom() > maxZoom) map.setZoom(maxZoom); });
+}
+
+/** Lee lat/lng de una posición de Google (LatLng o literal) */
+function gmLatLng(p) { return { lat: typeof p.lat === 'function' ? p.lat() : p.lat, lng: typeof p.lng === 'function' ? p.lng() : p.lng }; }

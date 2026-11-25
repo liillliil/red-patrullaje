@@ -20,7 +20,7 @@ function modal(titulo, html, wide) {
 }
 function cerrarModal() {
   $('#modal').hidden = true; $('#mBody').innerHTML = '';
-  if (MF && MF.map) { try { MF.map.remove(); } catch (e) { } MF.map = null; }
+  if (MF && MF.map) MF.map = null;
 }
 function confirmar(msg, okTxt) {
   return new Promise(function (res) {
@@ -124,8 +124,8 @@ function ir(sec) {
   $('#sidebar').classList.remove('open');
   var loaders = {
     dash: cargarDash, qrs: cargarQRs, usuarios: cargarUsuarios, distritos: cargarDistritos, mallas: function () { cargarMallas(); },
-    mapa: function () { cargarPoliciasSelect('mPol', val('#mDist')); if (!MAP_ESC) consultarMapa(); else MAP_ESC.map.invalidateSize(); },
-    cobertura: function () { if (!MAP_COB) consultarCobertura(); else MAP_COB.map.invalidateSize(); },
+    mapa: function () { cargarPoliciasSelect('mPol', val('#mDist')); if (!MAP_ESC) consultarMapa(); },
+    cobertura: function () { if (!MAP_COB) consultarCobertura(); },
     reportes: function () { cargarPoliciasSelect('rPol', val('#rDist')); },
     cuenta: renderCuenta
   };
@@ -169,32 +169,7 @@ function tablaEscaneos(list, corto) {
   }), 'Sin escaneos.');
 }
 
-/* ---------------- MAPAS ---------------- */
-function capasBase() {
-  var o = { maxZoom: 21 };
-  var esriImg = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-  var esriLbl = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
-  var esriRoads = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}';
-  return {
-    'Calles (detallado)': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', Object.assign({ subdomains: 'abcd', maxNativeZoom: 20, attribution: '© OpenStreetMap © CARTO' }, o)),
-    'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', Object.assign({ maxNativeZoom: 19, attribution: '© OpenStreetMap' }, o)),
-    'Satélite': L.tileLayer(esriImg, Object.assign({ maxNativeZoom: 19, attribution: 'Imágenes © Esri' }, o)),
-    'Satélite + calles y nombres': L.layerGroup([
-      L.tileLayer(esriImg, Object.assign({ maxNativeZoom: 19, attribution: 'Imágenes © Esri' }, o)),
-      L.tileLayer(esriRoads, Object.assign({ maxNativeZoom: 19 }, o)),
-      L.tileLayer(esriLbl, Object.assign({ maxNativeZoom: 19 }, o))])
-  };
-}
-function crearMapa(id) {
-  var base = capasBase();
-  var m = L.map(id, { layers: [base['Calles (detallado)']], maxZoom: 21 }).setView([-1.83, -78.18], 7);
-  L.control.scale({ imperial: false }).addTo(m);
-  var ctrl = L.control.layers(base, {}, { collapsed: true }).addTo(m);
-  return { map: m, ctrl: ctrl };
-}
-function numIcon(n, color) {
-  return L.divIcon({ className: 'num-icon', html: '<span style="background:' + color + '">' + n + '</span>', iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12] });
-}
+/* ---------------- MAPAS (Google Maps) ---------------- */
 function popupEsc(e) {
   return '<div class="pop"><b>' + esc(e.grado + ' ' + e.nombres) + '</b><br>CI: ' + esc(e.cedula) +
     '<br><b>QR ' + esc(e.qrNumero) + '</b> – ' + esc(e.qrNombre) +
@@ -207,50 +182,50 @@ function popupEsc(e) {
     '<br><a target="_blank" href="https://www.google.com/maps?q=' + e.lat + ',' + e.lng + '">Abrir en Google Maps</a></div>';
 }
 function toggleCapa(tipo, i, on) {
-  var it = LEY[tipo][i], map = (tipo === 'esc' ? MAP_ESC : MAP_COB).map;
-  if (on) it.layer.addTo(map); else map.removeLayer(it.layer);
+  var it = LEY[tipo][i], map = tipo === 'esc' ? MAP_ESC : MAP_COB;
+  it.on = on;
+  it.layer.setMap(on ? map : null);
 }
 function renderLeyenda(tipo, cont) {
   $(cont).innerHTML = LEY[tipo].length ? LEY[tipo].map(function (it, i) {
+    if (it.soloTexto) return '<div class="it"><span class="grow">' + it.html + '</span></div>';
     return '<label class="it" style="font-weight:400;color:inherit;cursor:pointer"><input type="checkbox" ' + (it.on ? 'checked' : '') + ' onchange="toggleCapa(\'' + tipo + '\',' + i + ',this.checked)">' +
       '<span class="dot" style="background:' + it.color + '"></span><span class="grow">' + it.html + '</span></label>';
   }).join('') : '<div class="muted">Sin datos para los filtros.</div>';
 }
+function limpiarCapas(tipo) { LEY[tipo].forEach(function (it) { it.layer.setMap(null); }); LEY[tipo] = []; }
 
 async function consultarMapa(btn) {
   await run(btn, async function () {
     var r = await apiT('mapaEscaneos', { desde: val('#mDesde'), hasta: val('#mHasta'), distritoId: val('#mDist'), usuarioId: val('#mPol') });
-    if (MAP_ESC) MAP_ESC.map.remove();
-    MAP_ESC = crearMapa('mapEsc');
-    var map = MAP_ESC.map, bounds = [];
-    LEY.esc = [];
-    var lq = L.layerGroup();
-    r.qrs.forEach(function (q) {
-      L.circleMarker([q.lat, q.lng], { radius: 5, color: '#555', weight: 1, fillColor: '#fff', fillOpacity: 1 }).bindTooltip('QR ' + q.numero + ' · ' + esc(q.nombre)).addTo(lq);
-    });
-    lq.addTo(map); MAP_ESC.ctrl.addOverlay(lq, 'Puntos QR registrados');
+    if (!MAP_ESC) MAP_ESC = await gmMapa($('#mapEsc'));
+    var map = MAP_ESC, bounds = [];
+    map.__info.close();
+    limpiarCapas('esc');
+    var lq = new Capa();
+    r.qrs.forEach(function (q) { lq.add(gmPunto(map, q.lat, q.lng, '#ffffff', 12, 'QR ' + q.numero + ' · ' + q.nombre, '<div class="pop"><b>QR ' + q.numero + '</b> – ' + esc(q.nombre) + '<br>' + esc(q.hora || 'Sin hora') + '</div>', '#555')); });
+    lq.setMap(map);
     LEY.esc.push({ layer: lq, color: '#999', html: '<b>Puntos QR</b> <span class="muted">(' + r.qrs.length + ')</span>', on: true });
     var grupos = {}, orden = [];
     r.escaneos.forEach(function (e) { if (!grupos[e.usuarioId]) { grupos[e.usuarioId] = []; orden.push(e.usuarioId); } grupos[e.usuarioId].push(e); });
     orden.forEach(function (uid, i) {
-      var color = COLORES[i % COLORES.length], lg = L.layerGroup();
+      var color = COLORES[i % COLORES.length], lg = new Capa();
       var pts = grupos[uid].slice().sort(function (a, b) { return a.fechaHora < b.fechaHora ? -1 : 1; });
       var porDia = {};
       pts.forEach(function (e) { (porDia[e.fecha] = porDia[e.fecha] || []).push([Number(e.lat), Number(e.lng)]); });
-      Object.keys(porDia).forEach(function (k) { if (porDia[k].length > 1) L.polyline(porDia[k], { color: color, weight: 3, opacity: .75, dashArray: '8 6' }).addTo(lg); });
+      Object.keys(porDia).forEach(function (k) { if (porDia[k].length > 1) lg.add(gmLinea(porDia[k], color, 3, true, true)); });
       pts.forEach(function (e, k) {
-        var ll = [Number(e.lat), Number(e.lng)]; bounds.push(ll);
-        L.marker(ll, { icon: numIcon(k + 1, color) }).bindPopup(popupEsc(e)).addTo(lg);
-        if (e.latDispositivo) L.circleMarker([Number(e.latDispositivo), Number(e.lngDispositivo)], { radius: 4, color: color, weight: 1, fillOpacity: .25, dashArray: '2 2' }).bindTooltip('GPS del celular (' + e.distanciaM + ' m del QR)').addTo(lg);
+        bounds.push([Number(e.lat), Number(e.lng)]);
+        if (e.latDispositivo) lg.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, color, 9, 'GPS del celular (' + e.distanciaM + ' m del QR)', null, '#fff'));
+        lg.add(gmNum(map, e.lat, e.lng, k + 1, color, popupEsc(e), e.hora + ' · QR ' + e.qrNumero));
       });
-      lg.addTo(map);
+      lg.setMap(map);
       var p = pts[0], nombre = p.grado + ' ' + p.nombres;
-      MAP_ESC.ctrl.addOverlay(lg, '<span style="color:' + color + '">●</span> ' + esc(nombre) + ' (' + pts.length + ')');
       LEY.esc.push({ layer: lg, color: color, on: true, html: '<b>' + esc(nombre) + '</b><br><span class="muted">CI ' + esc(p.cedula) + ' · ' + pts.length + ' escaneos · ' + pts[0].hora + '–' + pts[pts.length - 1].hora + '</span>' });
     });
     renderLeyenda('esc', '#mLeyenda');
     if (!bounds.length) r.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); });
-    if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+    gmAjustar(map, bounds, 18);
     if (!r.escaneos.length && btn) toast('No hay escaneos con esos filtros.');
   });
 }
@@ -258,57 +233,53 @@ async function consultarMapa(btn) {
 async function consultarCobertura(btn) {
   await run(btn, async function () {
     COB_DATA = await apiT('mapaCobertura', { fecha: val('#cFecha'), distritoId: val('#cDist') });
+    if (!MAP_COB) MAP_COB = await gmMapa($('#mapCob'), { mapTypeId: 'hybrid' });
     dibujarCobertura();
   });
 }
 function dibujarCobertura() {
-  if (!COB_DATA) return;
+  if (!COB_DATA || !MAP_COB) return;
   var radio = Number(val('#cRadio')) || CFG.radio;
-  if (MAP_COB) MAP_COB.map.remove();
-  MAP_COB = crearMapa('mapCob');
-  var map = MAP_COB.map, bounds = [];
-  LEY.cob = [];
+  var map = MAP_COB, bounds = [];
+  map.__info.close();
+  limpiarCapas('cob');
   var escPorPunto = {};
   COB_DATA.escaneos.forEach(function (e) { if (e.puntoId) escPorPunto[e.puntoId] = (escPorPunto[e.puntoId] || 0) + 1; });
   var unicos = {};
-  COB_DATA.mallas.forEach(function (m, i) {
-    var color = COLORES[i % COLORES.length], lg = L.layerGroup();
+  var capasMalla = COB_DATA.mallas.map(function (m, i) {
+    var color = COLORES[i % COLORES.length], lg = new Capa();
     var line = m.puntos.map(function (p) { return [p.lat, p.lng]; });
-    if (line.length > 1) L.polyline(line, { color: color, weight: 4, opacity: .85 }).addTo(lg);
+    if (line.length > 1) lg.add(gmLinea(line, color, 4, false, true));
     var hechos = 0;
     m.puntos.forEach(function (p) {
-      unicos[p.qrId] = [p.lat, p.lng]; bounds.push([p.lat, p.lng]);
+      unicos[p.qrId] = 1; bounds.push([p.lat, p.lng]);
       var ok = !!escPorPunto[p.id]; if (ok) hechos++;
-      L.circle([p.lat, p.lng], { radius: radio, color: color, weight: 1.5, fillColor: color, fillOpacity: .3 }).addTo(lg);
-      L.marker([p.lat, p.lng], { icon: numIcon(p.orden, color) }).bindPopup('<div class="pop"><b>' + esc(m.nombre) + '</b><br>Orden ' + p.orden + ': <b>QR ' + p.qrNumero + '</b> – ' + esc(p.qrNombre) +
+      lg.add(gmCirculo(p.lat, p.lng, radio, color, .3));
+      lg.add(gmNum(map, p.lat, p.lng, p.orden, color, '<div class="pop"><b>' + esc(m.nombre) + '</b><br>Orden ' + p.orden + ': <b>QR ' + p.qrNumero + '</b> – ' + esc(p.qrNombre) +
         '<br>Hora programada: ' + esc(p.hora || 'libre') + '<br>Radio de cobertura: ' + radio + ' m<br>Integrantes: ' + esc(m.asignados.join(', ')) +
-        '<br>Estado: ' + (ok ? '<span class="badge b-ok">Escaneado</span>' : '<span class="badge b-warn">Pendiente</span>') + '</div>').addTo(lg);
+        '<br>Estado: ' + (ok ? '<span class="badge b-ok">Escaneado</span>' : '<span class="badge b-warn">Pendiente</span>') + '</div>', 'Orden ' + p.orden + ' · QR ' + p.qrNumero));
     });
-    lg.addTo(map);
+    lg.setMap(map);
     var area = Math.round(m.puntos.length * Math.PI * radio * radio);
-    MAP_COB.ctrl.addOverlay(lg, '<span style="color:' + color + '">■</span> ' + esc(m.nombre));
-    LEY.cob.push({ layer: lg, color: color, on: true, html: '<b>' + esc(m.nombre) + '</b> <span class="badge">' + m.modo + '</span><br><span class="muted">' + m.puntos.length + ' puntos · ' + hechos + ' escaneados · ≈' + area.toLocaleString() + ' m²<br>' + esc(m.asignados.join(', ')) + '</span>' });
+    return { layer: lg, color: color, on: true, html: '<b>' + esc(m.nombre) + '</b> <span class="badge">' + m.modo + '</span><br><span class="muted">' + m.puntos.length + ' puntos · ' + hechos + ' escaneados · ≈' + area.toLocaleString() + ' m²<br>' + esc(m.asignados.join(', ')) + '</span>' };
   });
-  var lAll = L.layerGroup();
+  var nU = Object.keys(unicos).length;
+  LEY.cob.push({ soloTexto: true, layer: new Capa(), html: '<b>Resumen ' + esc(COB_DATA.fecha) + '</b><br><span class="muted">' + COB_DATA.mallas.length + ' mallas · ' + nU + ' puntos únicos cubiertos · ≈' + Math.round(nU * Math.PI * radio * radio).toLocaleString() + ' m² de cobertura (radio ' + radio + ' m)</span>' });
+  capasMalla.forEach(function (c) { LEY.cob.push(c); });
+  var lAll = new Capa();
   COB_DATA.qrs.forEach(function (q) {
-    L.circle([q.lat, q.lng], { radius: radio, color: '#555', weight: 1, fillColor: '#777', fillOpacity: .18 }).addTo(lAll);
-    L.circleMarker([q.lat, q.lng], { radius: 3, color: '#333', fillOpacity: 1 }).bindTooltip('QR ' + q.numero + ' · ' + esc(q.nombre)).addTo(lAll);
+    lAll.add(gmCirculo(q.lat, q.lng, radio, '#777777', .18));
+    lAll.add(gmPunto(map, q.lat, q.lng, '#333', 8, 'QR ' + q.numero + ' · ' + q.nombre, null, '#fff'));
   });
   var allOn = !COB_DATA.mallas.length;
-  if (allOn) { lAll.addTo(map); COB_DATA.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); }); }
-  MAP_COB.ctrl.addOverlay(lAll, 'Todos los puntos QR (' + radio + ' m)');
+  if (allOn) { lAll.setMap(map); COB_DATA.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); }); }
   LEY.cob.push({ layer: lAll, color: '#777', on: allOn, html: '<b>Todos los puntos QR</b><br><span class="muted">' + COB_DATA.qrs.length + ' puntos con radio de ' + radio + ' m</span>' });
-  var lE = L.layerGroup();
-  COB_DATA.escaneos.forEach(function (e) {
-    L.circleMarker([Number(e.lat), Number(e.lng)], { radius: 6, color: '#fff', weight: 2, fillColor: '#15925a', fillOpacity: 1 }).bindPopup(popupEsc(e)).addTo(lE);
-  });
-  lE.addTo(map);
-  MAP_COB.ctrl.addOverlay(lE, '✔ Escaneos realizados');
+  var lE = new Capa();
+  COB_DATA.escaneos.forEach(function (e) { lE.add(gmPunto(map, e.lat, e.lng, '#15925a', 14, e.hora + ' · ' + e.nombres, popupEsc(e), '#fff')); });
+  lE.setMap(map);
   LEY.cob.push({ layer: lE, color: '#15925a', on: true, html: '<b>Escaneos realizados</b><br><span class="muted">' + COB_DATA.escaneos.length + ' registros del día</span>' });
-  var nU = Object.keys(unicos).length;
-  LEY.cob.unshift({ layer: L.layerGroup(), color: 'transparent', on: false, html: '<b>Resumen ' + esc(COB_DATA.fecha) + '</b><br><span class="muted">' + COB_DATA.mallas.length + ' mallas · ' + nU + ' puntos únicos cubiertos · ≈' + Math.round(nU * Math.PI * radio * radio).toLocaleString() + ' m² de cobertura</span>' });
   renderLeyenda('cob', '#cLeyenda');
-  if (bounds.length) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 18 });
+  gmAjustar(map, bounds, 18);
 }
 
 /* ---------------- PUNTOS QR ---------------- */
@@ -341,23 +312,36 @@ function formQR(id) {
     '<div><label>Longitud</label><input id="fqLng" value="' + q.lng + '" oninput="moverMarcadorQR()"></div>' +
     '<div class="full"><div class="row mb"><span class="muted small grow">Haga clic en el mapa o arrastre el marcador para ubicar el punto.</span><button class="btn btn-sm" onclick="miUbicacionQR(this)">📍 Usar mi ubicación</button></div><div id="fqMap" class="map map-sm"></div></div>' +
     '</div><div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="fqBtn" onclick="guardarQR(\'' + (id || '') + '\')">Guardar</button></div>');
-  setTimeout(function () {
+  setTimeout(async function () {
     if (!document.getElementById('fqMap')) return;
-    var mm = crearMapa('fqMap');
-    MF = { map: mm.map, marker: null };
-    if (q.lat) { MF.marker = L.marker([q.lat, q.lng], { draggable: true }).addTo(mm.map); mm.map.setView([q.lat, q.lng], 18); bindDrag(); }
-    else if (QRS.length) mm.map.setView([QRS[0].lat, QRS[0].lng], 15);
-    mm.map.on('click', function (ev) { $('#fqLat').value = ev.latlng.lat.toFixed(7); $('#fqLng').value = ev.latlng.lng.toFixed(7); moverMarcadorQR(true); });
-    mm.map.invalidateSize();
+    var map;
+    try { map = await gmMapa($('#fqMap'), { mapTypeId: 'hybrid' }); } catch (e) { toast(e.message, 'err'); return; }
+    if (!document.getElementById('fqMap')) return;
+    MF = { map: map, marker: null };
+    if (q.lat) { ponerMarcadorQR(q.lat, q.lng); map.setCenter({ lat: Number(q.lat), lng: Number(q.lng) }); map.setZoom(19); }
+    else if (QRS.length) { map.setCenter({ lat: QRS[0].lat, lng: QRS[0].lng }); map.setZoom(16); }
+    map.addListener('click', function (ev) {
+      $('#fqLat').value = ev.latLng.lat().toFixed(7); $('#fqLng').value = ev.latLng.lng().toFixed(7);
+      ponerMarcadorQR(ev.latLng.lat(), ev.latLng.lng());
+    });
   }, 120);
 }
-function bindDrag() { MF.marker.on('dragend', function () { var p = MF.marker.getLatLng(); $('#fqLat').value = p.lat.toFixed(7); $('#fqLng').value = p.lng.toFixed(7); }); }
-function moverMarcadorQR(noZoom) {
+function ponerMarcadorQR(lat, lng) {
+  var pos = { lat: Number(lat), lng: Number(lng) };
+  if (!MF.marker) {
+    MF.marker = new google.maps.marker.AdvancedMarkerElement({ map: MF.map, position: pos, gmpDraggable: true, title: 'Arrastre para ajustar la ubicación' });
+    MF.marker.addListener('dragend', function () {
+      var p = gmLatLng(MF.marker.position);
+      $('#fqLat').value = Number(p.lat).toFixed(7); $('#fqLng').value = Number(p.lng).toFixed(7);
+    });
+  } else MF.marker.position = pos;
+}
+function moverMarcadorQR() {
   var lat = Number(String(val('#fqLat')).replace(',', '.')), lng = Number(String(val('#fqLng')).replace(',', '.'));
   if (!MF || !MF.map || !isFinite(lat) || !isFinite(lng) || !lat || !lng) return;
-  if (!MF.marker) { MF.marker = L.marker([lat, lng], { draggable: true }).addTo(MF.map); bindDrag(); } else MF.marker.setLatLng([lat, lng]);
-  if (noZoom === true) return;
-  MF.map.setView([lat, lng], Math.max(MF.map.getZoom(), 17));
+  ponerMarcadorQR(lat, lng);
+  MF.map.setCenter({ lat: lat, lng: lng });
+  if (MF.map.getZoom() < 18) MF.map.setZoom(18);
 }
 function pegarCoords(s) { var c = parseCoords(s); if (c) { $('#fqLat').value = c.lat; $('#fqLng').value = c.lng; moverMarcadorQR(); } }
 function miUbicacionQR(btn) {
@@ -469,7 +453,11 @@ async function formMalla(id) {
     '<div class="mt"><div id="mfMap" class="map map-sm"></div></div>' +
     '<div class="modal-foot"><label style="margin:0 auto 0 0;display:flex;gap:6px;align-items:center;color:var(--texto)"><input type="checkbox" id="mfMail" checked> Enviar la red por correo a los asignados</label>' +
     '<button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="mfBtn" onclick="guardarMalla()">Guardar malla</button></div>', true);
-  setTimeout(function () { if (!document.getElementById('mfMap')) return; MF.map = crearMapa('mfMap').map; cargarMFDistrito(esSuper() ? val('#mfDist') : USER.distritoId); }, 100);
+  setTimeout(async function () {
+    if (!document.getElementById('mfMap')) return;
+    cargarMFDistrito(esSuper() ? val('#mfDist') : USER.distritoId);
+    try { var map = await gmMapa($('#mfMap')); if (MF && document.getElementById('mfMap')) { MF.map = map; renderMFPuntos(); } } catch (e) { toast(e.message, 'err'); }
+  }, 100);
 }
 async function cargarMFDistrito(dId) {
   try {
@@ -506,18 +494,19 @@ function renderMFPuntos() {
       '<div class="acciones"><button class="btn btn-sm" onclick="moverPuntoMF(' + i + ',-1)">↑</button><button class="btn btn-sm" onclick="moverPuntoMF(' + i + ',1)">↓</button><button class="btn btn-sm btn-danger" onclick="quitarPuntoMF(' + i + ')">✕</button></div></div>';
   }).join('') || '<div class="muted small">Agregue los puntos en el orden en que deben escanearse.</div>';
   if (MF.map) {
-    MF.map.eachLayer(function (l) { if (!(l instanceof L.TileLayer)) MF.map.removeLayer(l); });
+    if (MF.capa) MF.capa.setMap(null);
+    MF.capa = new Capa();
     var line = [];
     MF.puntos.forEach(function (p, i) {
       var q = qm[p.qrId]; if (!q) return;
       line.push([q.lat, q.lng]);
-      L.circle([q.lat, q.lng], { radius: CFG.radio, color: '#1a4fa3', weight: 1, fillOpacity: .25 }).addTo(MF.map);
-      L.marker([q.lat, q.lng], { icon: numIcon(i + 1, '#0b2e6b') }).bindTooltip('QR ' + q.numero + ' ' + esc(q.nombre) + ' ' + (p.hora || '')).addTo(MF.map);
+      MF.capa.add(gmCirculo(q.lat, q.lng, CFG.radio, '#1a4fa3', .25));
+      MF.capa.add(gmNum(MF.map, q.lat, q.lng, i + 1, '#0b2e6b', null, 'QR ' + q.numero + ' ' + q.nombre + ' ' + (p.hora || '')));
     });
-    if (line.length > 1) L.polyline(line, { color: '#1a4fa3', weight: 3 }).addTo(MF.map);
+    if (line.length > 1) MF.capa.add(gmLinea(line, '#1a4fa3', 3, false, true));
+    MF.capa.setMap(MF.map);
     var all = line.length ? line : MF.qrs.map(function (q) { return [q.lat, q.lng]; });
-    MF.map.invalidateSize();
-    if (all.length) MF.map.fitBounds(all, { padding: [30, 30], maxZoom: 17 });
+    gmAjustar(MF.map, all, 17);
   }
 }
 async function guardarMalla() {

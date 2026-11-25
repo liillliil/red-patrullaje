@@ -117,25 +117,29 @@ function renderRuta(ruta) {
       }).join('') + '</div>';
   }).join('');
 }
-function dibujarMapa(ruta) {
+var CAPA_RUTA = null;
+async function dibujarMapa(ruta) {
   var pts = [];
   ruta.forEach(function (m) { m.puntos.forEach(function (p) { if (isFinite(p.lat) && p.lat) pts.push(p); }); });
   $('#hMapCard').hidden = !pts.length;
   if (!pts.length) return;
-  if (MAPA) MAPA.remove();
-  MAPA = L.map('hMap', { maxZoom: 21 });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 21, maxNativeZoom: 20, attribution: '© OpenStreetMap © CARTO' }).addTo(MAPA);
+  try { if (!MAPA) MAPA = await gmMapa($('#hMap'), { streetViewControl: false }); }
+  catch (e) { $('#hMapCard').hidden = true; return; }
+  if (CAPA_RUTA) CAPA_RUTA.setMap(null);
+  CAPA_RUTA = new Capa();
   ruta.forEach(function (m) {
     var line = m.puntos.map(function (p) { return [p.lat, p.lng]; });
-    if (line.length > 1) L.polyline(line, { color: '#1a4fa3', weight: 3, opacity: .8 }).addTo(MAPA);
+    if (line.length > 1) CAPA_RUTA.add(gmLinea(line, '#1a4fa3', 3, false, true));
     m.puntos.forEach(function (p) {
       var c = p.hecho ? '#15925a' : '#0b2e6b';
-      L.circle([p.lat, p.lng], { radius: RADIO, color: c, weight: 1, fillOpacity: .25 }).addTo(MAPA);
-      L.marker([p.lat, p.lng], { icon: L.divIcon({ className: 'num-icon', html: '<span style="background:' + c + '">' + (p.hecho ? '✓' : p.orden) + '</span>', iconSize: [26, 26], iconAnchor: [13, 13] }) })
-        .bindPopup('<b>QR ' + p.qrNumero + '</b> ' + esc(p.qrNombre) + '<br>' + (p.hora || 'Sin hora')).addTo(MAPA);
+      CAPA_RUTA.add(gmCirculo(p.lat, p.lng, RADIO, c, .25));
+      CAPA_RUTA.add(gmNum(MAPA, p.lat, p.lng, p.hecho ? '✓' : p.orden, c,
+        '<div class="pop"><b>QR ' + p.qrNumero + '</b> ' + esc(p.qrNombre) + '<br>' + (p.hora || 'Sin hora') +
+        '<br><a target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '">Cómo llegar</a></div>', 'QR ' + p.qrNumero));
     });
   });
-  MAPA.fitBounds(pts.map(function (p) { return [p.lat, p.lng]; }), { padding: [30, 30], maxZoom: 17 });
+  CAPA_RUTA.setMap(MAPA);
+  gmAjustar(MAPA, pts.map(function (p) { return [p.lat, p.lng]; }), 17);
 }
 function irHome() { mostrar('vHome'); cargarHome().catch(function (e) { if (!e.silent) toast(e.message, 'err'); }); }
 

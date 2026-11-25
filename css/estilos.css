@@ -108,3 +108,8 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13px}
   body.printing{background:#fff}
   @page{margin:12mm}
 }
+
+/* Marcadores de Google Maps */
+.gm-num{width:28px;height:28px;border-radius:50%;color:#fff;font:700 12px system-ui,Arial,sans-serif;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5);transform:translateY(50%);cursor:pointer}
+.gm-dot{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);transform:translateY(50%);cursor:pointer}
+.gm-style .pop{font-size:13px;line-height:1.45;max-width:260px}
