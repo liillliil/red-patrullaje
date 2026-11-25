@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Red de Patrullaje · Panel de control</title>
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/estilos.css">
+  <style>
+    .app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+    .sidebar{background:var(--azul);color:#fff;padding:14px 10px;position:sticky;top:0;height:100vh;overflow:auto}
+    .brand{display:flex;gap:10px;align-items:center;padding:6px 8px 16px;border-bottom:1px solid rgba(255,255,255,.15);margin-bottom:10px}
+    .brand .logo{width:40px;height:40px;font-size:20px;margin:0;background:#fff;color:var(--azul)}
+    .brand b{display:block;font-size:15px} .brand small{opacity:.7;font-size:11px}
+    .nav button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:none;border:0;color:#dfe7f7;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:14px;margin-bottom:2px}
+    .nav button:hover{background:rgba(255,255,255,.08);color:#fff}
+    .nav button.on{background:#fff;color:var(--azul);font-weight:600}
+    .nav .ico{width:20px;text-align:center}
+    .main{padding:18px 22px;min-width:0}
+    .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:10px;flex-wrap:wrap}
+    .user-chip{background:#fff;border:1px solid var(--borde);border-radius:30px;padding:6px 12px;font-size:13px}
+    .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+    .filters > div{min-width:150px}
+    .burger{display:none}
+    .map-layout{display:grid;grid-template-columns:1fr 280px;gap:12px}
+    .side-list{background:#fff;border:1px solid var(--borde);border-radius:var(--radio);padding:10px;max-height:600px;overflow:auto;font-size:13px}
+    .side-list .it{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-bottom:1px solid var(--borde)}
+    .dot{width:12px;height:12px;border-radius:50%;flex:none;margin-top:3px}
+    .pt-list .pt{display:grid;grid-template-columns:34px 1fr 110px 110px;gap:8px;align-items:center;padding:6px;border-bottom:1px solid var(--borde)}
+    .chk-list{max-height:260px;overflow:auto;border:1px solid var(--borde);border-radius:8px;padding:6px}
+    .chk-list label{display:flex;gap:8px;align-items:center;font-weight:400;color:var(--texto);font-size:13px;padding:4px;margin:0;cursor:pointer}
+    .cell-ok{background:var(--verde2)} .cell-warn{background:var(--ambar2)} .cell-bad{background:var(--rojo2)}
+    @media (max-width:900px){
+      .app{grid-template-columns:1fr}
+      .sidebar{position:fixed;left:-260px;width:240px;z-index:4000;transition:left .2s}
+      .sidebar.open{left:0}
+      .burger{display:inline-flex}
+      .map-layout{grid-template-columns:1fr}
+      .main{padding:12px}
+      .pt-list .pt{grid-template-columns:30px 1fr;}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="vLogin" class="login-wrap" hidden>
+  <div class="login-card">
+    <div class="logo">🛡️</div>
+    <h1><span data-app-nombre>Red de Patrullaje</span></h1>
+    <div class="sub">Panel de control · <span data-institucion></span></div>
+    <form id="fLogin" onsubmit="doLogin(event)">
+      <div class="field"><label>Correo o cédula</label><input id="lgUser" autocomplete="username" required></div>
+      <div class="field"><label>Clave</label><input id="lgPass" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary btn-block" id="lgBtn">Ingresar</button>
+    </form>
+    <div class="center mt"><button class="link" onclick="doRecuperar()">Olvidé mi clave</button></div>
+  </div>
+</div>
+
+<!-- ============ CAMBIO DE CLAVE OBLIGATORIO ============ -->
+<div id="vCambio" class="login-wrap" hidden>
+  <div class="login-card">
+    <div class="logo">🔑</div>
+    <h1>Cambie su clave</h1>
+    <div class="sub">Por seguridad debe reemplazar la clave temporal.</div>
+    <form onsubmit="doCambio(event)">
+      <div class="field"><label>Clave temporal / actual</label><input id="cbAct" type="password" required></div>
+      <div class="field"><label>Nueva clave (mín. 8, letras y números)</label><input id="cbNew" type="password" required></div>
+      <div class="field"><label>Repita la nueva clave</label><input id="cbNew2" type="password" required></div>
+      <button class="btn btn-primary btn-block" id="cbBtn">Guardar y continuar</button>
+    </form>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="vApp" class="app" hidden>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="logo">🛡️</div><div><b><span data-app-nombre>Red de Patrullaje</span></b><small>Panel de control</small></div></div>
+    <nav class="nav" id="nav">
+      <button data-sec="dash"><span class="ico">📊</span>Tablero</button>
+      <button data-sec="mapa"><span class="ico">🗺️</span>Mapa de escaneos</button>
+      <button data-sec="cobertura"><span class="ico">🎯</span>Rutas y cobertura</button>
+      <button data-sec="mallas"><span class="ico">📅</span>Malla operativa</button>
+      <button data-sec="qrs"><span class="ico">🔳</span>Puntos QR</button>
+      <button data-sec="usuarios"><span class="ico">👮</span>Usuarios</button>
+      <button data-sec="distritos" data-super="1"><span class="ico">🏢</span>Distritos / Servicios</button>
+      <button data-sec="reportes"><span class="ico">📋</span>Reporte de escaneos</button>
+      <button data-sec="cuenta"><span class="ico">⚙️</span>Mi cuenta</button>
+    </nav>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="row"><button class="btn burger" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button><h2 id="secTitle" style="margin:0">Tablero</h2></div>
+      <div class="row"><span class="user-chip" id="userChip"></span><button class="btn btn-sm" onclick="salir()">Salir</button></div>
+    </div>
+
+    <!-- TABLERO -->
+    <section id="s-dash" class="sec">
+      <div class="filters"><div data-only-super><label>Distrito / Servicio</label><select id="dDist" onchange="cargarDash()"></select></div>
+        <button class="btn" onclick="cargarDash()">↻ Actualizar</button><span class="muted small" id="dHora"></span></div>
+      <div class="stats" id="dStats"></div>
+      <div class="card"><h3>Cumplimiento de mallas de hoy</h3><div id="dMallas"></div></div>
+      <div class="card"><h3>Últimos escaneos de hoy</h3><div id="dUlt"></div></div>
+    </section>
+
+    <!-- MAPA DE ESCANEOS -->
+    <section id="s-mapa" class="sec" hidden>
+      <div class="filters">
+        <div><label>Desde</label><input type="date" id="mDesde"></div>
+        <div><label>Hasta</label><input type="date" id="mHasta"></div>
+        <div data-only-super><label>Distrito / Servicio</label><select id="mDist" onchange="cargarPoliciasSelect('mPol', this.value)"></select></div>
+        <div><label>Servidor policial</label><select id="mPol"></select></div>
+        <button class="btn btn-primary" onclick="consultarMapa(this)">Consultar</button>
+      </div>
+      <div class="map-layout">
+        <div id="mapEsc" class="map"></div>
+        <div class="side-list"><b>Servidores (capas)</b><div class="muted small mb">Active/desactive cada servidor.</div><div id="mLeyenda" class="muted small">Realice una consulta.</div></div>
+      </div>
+    </section>
+
+    <!-- COBERTURA -->
+    <section id="s-cobertura" class="sec" hidden>
+      <div class="filters">
+        <div><label>Fecha de la malla</label><input type="date" id="cFecha"></div>
+        <div data-only-super><label>Distrito / Servicio</label><select id="cDist"></select></div>
+        <div style="min-width:110px"><label>Radio (m)</label><input type="number" id="cRadio" min="5" max="500" onchange="dibujarCobertura()"></div>
+        <button class="btn btn-primary" onclick="consultarCobertura(this)">Consultar</button>
+      </div>
+      <div class="map-layout">
+        <div id="mapCob" class="map"></div>
+        <div class="side-list"><b>Capas de rutas</b><div class="muted small mb">Cada malla es una capa con su sombreado de cobertura.</div><div id="cLeyenda" class="muted small">Realice una consulta.</div></div>
+      </div>
+    </section>
+
+    <!-- MALLAS -->
+    <section id="s-mallas" class="sec" hidden>
+      <div class="filters">
+        <div><label>Desde</label><input type="date" id="maDesde"></div>
+        <div><label>Hasta</label><input type="date" id="maHasta"></div>
+        <div data-only-super><label>Distrito / Servicio</label><select id="maDist"></select></div>
+        <button class="btn" onclick="cargarMallas(this)">Buscar</button>
+        <div class="grow"></div>
+        <button class="btn btn-primary" onclick="formMalla()">+ Nueva malla</button>
+      </div>
+      <div id="maTabla"></div>
+    </section>
+
+    <!-- QRS -->
+    <section id="s-qrs" class="sec" hidden>
+      <div class="filters">
+        <div data-only-super><label>Distrito / Servicio</label><select id="qDist" onchange="cargarQRs()"></select></div>
+        <div><label>Buscar</label><input id="qBuscar" placeholder="Número o nombre" oninput="renderQRs()"></div>
+        <div class="grow"></div>
+        <button class="btn" onclick="imprimirSeleccionados()">🖨️ Imprimir seleccionados</button>
+        <button class="btn btn-primary" onclick="formQR()">+ Nuevo QR</button>
+      </div>
+      <div id="qTabla"></div>
+    </section>
+
+    <!-- USUARIOS -->
+    <section id="s-usuarios" class="sec" hidden>
+      <div class="filters">
+        <div data-only-super><label>Distrito / Servicio</label><select id="uDist" onchange="cargarUsuarios()"></select></div>
+        <div data-only-super><label>Rol</label><select id="uRol" onchange="cargarUsuarios()"><option value="">Todos</option><option>SUPERADMIN</option><option>ADMIN</option><option>POLICIA</option></select></div>
+        <div><label>Estado</label><select id="uEstado" onchange="cargarUsuarios()"><option value="">Todos</option><option>ACTIVO</option><option>PENDIENTE</option><option>INACTIVO</option></select></div>
+        <div><label>Buscar</label><input id="uBuscar" placeholder="Cédula, nombre o correo" oninput="renderUsuarios()"></div>
+        <div class="grow"></div>
+        <button class="btn btn-primary" onclick="formUsuario()">+ Nuevo usuario</button>
+      </div>
+      <div id="uTabla"></div>
+    </section>
+
+    <!-- DISTRITOS -->
+    <section id="s-distritos" class="sec" hidden>
+      <div class="filters"><div class="grow"></div><button class="btn btn-primary" onclick="formDistrito()">+ Nuevo</button></div>
+      <div id="diTabla"></div>
+    </section>
+
+    <!-- REPORTES -->
+    <section id="s-reportes" class="sec" hidden>
+      <div class="filters">
+        <div><label>Desde</label><input type="date" id="rDesde"></div>
+        <div><label>Hasta</label><input type="date" id="rHasta"></div>
+        <div data-only-super><label>Distrito / Servicio</label><select id="rDist" onchange="cargarPoliciasSelect('rPol', this.value)"></select></div>
+        <div><label>Servidor policial</label><select id="rPol"></select></div>
+        <button class="btn btn-primary" onclick="consultarReporte(this)">Consultar</button>
+        <button class="btn" onclick="descargarCSV()">⬇ CSV (Excel)</button>
+        <button class="btn" onclick="exportarReporte(this)">⬇ Exportar a Google Sheets</button>
+      </div>
+      <div id="rTabla"></div>
+    </section>
+
+    <!-- CUENTA -->
+    <section id="s-cuenta" class="sec" hidden>
+      <div class="card" style="max-width:520px">
+        <h3>Mis datos</h3><div id="ctDatos" class="mb"></div>
+        <h3>Cambiar clave</h3>
+        <form onsubmit="cambiarMiClave(event)">
+          <div class="field"><label>Clave actual</label><input type="password" id="ctAct" required></div>
+          <div class="field"><label>Nueva clave</label><input type="password" id="ctNew" required></div>
+          <div class="field"><label>Repita la nueva clave</label><input type="password" id="ctNew2" required></div>
+          <button class="btn btn-primary" id="ctBtn">Cambiar clave</button>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- MODAL -->
+<div id="modal" class="modal" hidden onclick="if(event.target===this)cerrarModal()">
+  <div class="modal-box" id="modalBox">
+    <div class="modal-head"><h3 id="mTitle"></h3><button class="x" onclick="cerrarModal()">×</button></div>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+<div id="toast"></div>
+<div id="printArea"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/comun.js"></script>
+<script src="js/panel.js"></script>
+</body>
+</html>
