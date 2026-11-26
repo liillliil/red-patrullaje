@@ -1,7 +1,7 @@
 # Red de Patrullaje – Apps Script (API) + GitHub Pages (pantallas)
 
 ```
-apps-script/   → se pega en Google Apps Script (base de datos, correos, lógica)
+apps-script/   → se pega en Google Apps Script (base de datos, fotos y lógica)
 github/        → se sube a un repositorio de GitHub (app policial y panel)
 ```
 
@@ -13,14 +13,17 @@ github/        → se sube a un repositorio de GitHub (app policial y panel)
    - En **Configuración del proyecto** marque "Mostrar archivo de manifiesto" y pegue `appsscript.json`.
    - Si tenía la versión anterior, **borre** los archivos HTML (`Admin`, `AdminJs`, `Policia` HTML, `PoliciaJs`, `Estilos`) y reemplace todos los `.gs`.
 3. En `Config.gs` edite:
-   - `SUPERADMIN_INICIAL.email` y `cedula`.
+   - `SUPERADMIN_INICIAL.email` y **`cedula`** (su cédula real: será su usuario y su clave inicial).
    - `FRONTEND_URL` → la dirección de GitHub Pages (paso 2.4), ej. `https://miusuario.github.io/red-patrullaje/`
 4. **Implementar → Nueva implementación → tipo "Aplicación web"**
    - Ejecutar como: **Yo**
    - Quién tiene acceso: **Cualquier persona**
    - Copie la **URL que termina en `/exec`**.
 5. En el editor seleccione la función **`instalar`** → **Ejecutar** → autorice los permisos.
-   Llega un correo con la clave temporal del Super Admin (también aparece en el registro de ejecución).
+   Esto crea las hojas, el Super Admin y la **limpieza diaria automática de fotos**.
+   Ingrese al panel con su **cédula como usuario y como clave** (con o sin el 0); se le pedirá cambiarla.
+   > El manifiesto activa el servicio avanzado **Drive API** (necesario para borrar fotos definitivamente).
+   > Si el editor lo pide, en "Servicios" ➕ agregue **Drive API (v3)**.
 
 > Prueba: abra la URL `/exec` en el navegador. Debe mostrar `{"ok":true,"data":{"estado":"API activa"...}}`.
 
@@ -79,9 +82,30 @@ En iPhone: Safari → Compartir → "Agregar a pantalla de inicio".
 | "Google Maps rechazó la clave" / mapa gris con "Esta página no puede cargar Google Maps" | API no habilitada, facturación sin vincular, o la restricción de sitios no incluye `https://TU-USUARIO.github.io/*`. Los cambios de restricción tardan hasta 5 minutos. |
 | Marcadores no aparecen | Revise que `GOOGLE_MAP_ID` tenga un valor (`DEMO_MAP_ID` o su ID). |
 
+## Sin correos
+- El sistema **no envía correos**. Usuario y clave inicial de cada persona = **su cédula** (con o sin el 0); en el primer ingreso debe cambiarla.
+- "Olvidé mi clave": el administrador la restablece con 🔑 (vuelve a ser la cédula).
+- Las mallas se comparten con el botón **📄 PDF** (WhatsApp, chats de trabajo, etc.).
+
+## Asignación de personal (pantalla Usuarios)
+- Cree la malla (puntos, horas y vigencia) y luego asigne el personal desde **Usuarios**.
+- Colores: ⚪ sin malla · 🟢 1 malla · 🟣 2 o más mallas.
+- **Asignar** (uno o varios usuarios marcados → una o varias mallas), **Mover** (de una malla a otra u otras), **Limpiar** (retira de todas sus mallas vigentes).
+- Nunca se permiten mallas que se crucen en fechas y horario para la misma persona; si hay un cruce en un lote, no se guarda nada.
+
+## Fotos de evidencia: 10 días
+- Las fotos se **borran definitivamente** a los `FOTOS_DIAS` (10) días con una tarea diaria automática (3:00 a.m.). Ajustable en `Config.gs`.
+
+## Control anti-fraude (GPS + foto) y mallas con vigencia
+- Flujo del policía: **escanear QR → botón "Activar GPS" → foto en vivo** (reto al azar: adelante, derecha, izquierda o atrás). No existe opción de adjuntar fotos de la galería.
+- Si el celular está a más de `GEOCERCA_M` (50 m) del QR, el escaneo queda **NO VÁLIDO** con la ubicación real como evidencia y no cuenta para el cumplimiento. Cada QR puede tener su propio radio (campo "Radio de geocerca").
+- Las fotos se guardan en Google Drive, carpeta **"Red de Patrullaje - Evidencias"**, del dueño del script (privadas).
+- Ajustes en `Config.gs`: `GEOCERCA_M`, `GPS_PRECISION_MAX_M`, `FOTO_OBLIGATORIA`, `FOTOS_POR_ESCANEO`, `FOTO_LIMITE_SEG`.
+- Las mallas tienen vigencia **desde/hasta** y PDF (📄).
+- Las hojas se actualizan solas con las columnas nuevas (no hace falta volver a ejecutar `instalar`).
+
 ## Notas
 - Cédula: acepta 9 o 10 dígitos; siempre se guarda con 10 (antepone el 0).
-- El repositorio público solo contiene las pantallas. Los datos, claves y correos quedan en Google.
-- Cuota de correos: 100/día (Gmail) o 1.500/día (Google Workspace).
+- El repositorio público solo contiene las pantallas. Los datos, claves y fotos quedan en Google.
 - La cámara requiere que el policía acepte el permiso la primera vez. Si lo negó:
   candado junto a la dirección → Permisos → Cámara → Permitir.

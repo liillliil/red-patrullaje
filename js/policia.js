@@ -16,7 +16,7 @@ if ('serviceWorker' in navigator) { window.addEventListener('load', function () 
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); EVENTO_INSTALAR = e; var b = $('#instalarBox'); if (b) b.hidden = false; });
 function instalarApp() { if (!EVENTO_INSTALAR) return; EVENTO_INSTALAR.prompt(); EVENTO_INSTALAR = null; $('#instalarBox').hidden = true; }
 
-function mostrar(id) { ['vLogin', 'vRegistro', 'vCambio', 'vHome', 'vScan', 'vRes'].forEach(function (v) { $('#' + v).hidden = v !== id; }); window.scrollTo(0, 0); }
+function mostrar(id) { ['vLogin', 'vRegistro', 'vCambio', 'vHome', 'vScan', 'vGps', 'vFoto', 'vRes'].forEach(function (v) { $('#' + v).hidden = v !== id; }); window.scrollTo(0, 0); }
 function mostrarLogin() { $('#lgBanner').hidden = !QR_PENDIENTE; mostrar('vLogin'); }
 function badge(e) {
   var c = { 'A TIEMPO': 'b-ok', 'ADELANTADO': 'b-warn', 'ATRASADO': 'b-bad', 'SIN HORA': 'b-gray' }[e] || 'b-gray';
@@ -96,7 +96,8 @@ async function cargarHome(mostrarVista) {
   $('#hFecha').textContent = r.hoyLargo;
   renderRuta(r.ruta);
   $('#hEsc').innerHTML = r.escaneos.length ? r.escaneos.map(function (e) {
-    return '<div class="kv"><span><b>' + e.hora + '</b> · QR ' + esc(e.qrNumero) + ' ' + esc(e.qrNombre) + '</span><span>' + badge(e.estadoHora) + '</span></div>';
+    var v = e.validez === 'VALIDO' ? badge(e.estadoHora) : '<span class="badge ' + (e.validez === 'PENDIENTE FOTO' ? 'b-warn' : 'b-bad') + '">' + esc(e.validez) + '</span>';
+    return '<div class="kv"><span><b>' + e.hora + '</b> · QR ' + esc(e.qrNumero) + ' ' + esc(e.qrNombre) + '</span><span>' + v + '</span></div>';
   }).join('') : '<div class="muted small">Aún no registra escaneos hoy.</div>';
   if (mostrarVista !== false) mostrar('vHome');
   setTimeout(function () { dibujarMapa(r.ruta); }, 150);
@@ -146,7 +147,7 @@ function irHome() { mostrar('vHome'); cargarHome().catch(function (e) { if (!e.s
 /* ---------- escáner ---------- */
 async function abrirEscaner() {
   mostrar('vScan');
-  $('#scanErr').hidden = true; $('#scManual').value = '';
+  $('#scanErr').hidden = true;
   if (typeof Html5Qrcode === 'undefined') { errorCamara(); return; }
   try {
     SCANNER = new Html5Qrcode('reader');
@@ -157,71 +158,184 @@ async function abrirEscaner() {
 }
 function errorCamara() {
   $('#scanErr').hidden = false;
-  $('#scanErr').innerHTML = 'No se pudo abrir la cámara. Verifique que dio <b>permiso de cámara</b> al navegador (candado junto a la dirección → Permisos).<br>También puede escanear con la cámara normal del celular o usar "Tomar foto del QR".';
+  $('#scanErr').innerHTML = 'No se pudo abrir la cámara. Verifique que dio <b>permiso de cámara</b> al navegador (candado junto a la dirección → Permisos).<br>También puede escanear con la cámara normal del celular: se abrirá esta app.';
 }
 async function cerrarEscaner(sinVolver) {
   if (SCANNER) { try { await SCANNER.stop(); } catch (e) { } try { SCANNER.clear(); } catch (e) { } SCANNER = null; }
   if (sinVolver !== true) mostrar('vHome');
 }
-async function escanearFoto(inp) {
-  var f = inp.files && inp.files[0];
-  if (!f) return;
-  try {
-    if (SCANNER) { try { await SCANNER.stop(); } catch (e) { } }
-    var lector = SCANNER || new Html5Qrcode('reader');
-    var txt = await lector.scanFile(f, false);
-    try { lector.clear(); } catch (e) { }
-    SCANNER = null;
-    procesar(txt);
-  } catch (e) { toast('No se detectó un código QR en la foto. Intente de nuevo más cerca y con buena luz.', 'err'); }
-  inp.value = '';
-}
+/* ---------- PASO 2: GPS obligatorio ---------- */
+var CODIGO = '', RESP = null, RETOS = [], STREAM = null, CD_TIMER = null, LIMITE = 0, FOTO_DATA = null, GEO = null;
 
-/* ---------- registro del escaneo ---------- */
-function obtenerGeo() {
-  return new Promise(function (res) {
-    if (!navigator.geolocation) return res(null);
-    var hecho = false;
-    var t = setTimeout(function () { if (!hecho) { hecho = true; res(null); } }, 8000);
-    navigator.geolocation.getCurrentPosition(function (p) {
-      if (hecho) return; hecho = true; clearTimeout(t);
-      res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy });
-    }, function () { if (!hecho) { hecho = true; clearTimeout(t); res(null); } }, { enableHighAccuracy: true, timeout: 7500, maximumAge: 30000 });
+/** Lee varias posiciones durante unos segundos y se queda con la más precisa */
+function obtenerGeoPreciso(onProgreso) {
+  return new Promise(function (res, rej) {
+    if (!navigator.geolocation) return rej(new Error('Este celular no permite obtener la ubicación.'));
+    var mejor = null, fin = false, wid = null;
+    function terminar(err) {
+      if (fin) return; fin = true;
+      if (wid !== null) navigator.geolocation.clearWatch(wid);
+      clearTimeout(t);
+      if (mejor) res(mejor); else rej(err || new Error('No se pudo obtener la ubicación.'));
+    }
+    var t = setTimeout(function () { terminar(); }, 12000);
+    wid = navigator.geolocation.watchPosition(function (p) {
+      var g = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+      if (!mejor || g.acc < mejor.acc) mejor = g;
+      if (onProgreso) onProgreso(mejor);
+      if (mejor.acc <= 15) terminar();
+    }, function (e) {
+      if (e.code === 1) { fin = true; clearTimeout(t); if (wid !== null) navigator.geolocation.clearWatch(wid); rej(new Error('PERMISO')); }
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 });
   });
 }
-async function procesar(codigo) {
+
+function procesar(codigo) {
   codigo = String(codigo || '').trim();
   if (!codigo || PROCESANDO) return;
-  PROCESANDO = true;
-  mostrar('vRes');
-  $('#resBox').innerHTML = '<div class="res-ico">⏳</div><h2>Registrando punto...</h2><p class="muted">Obteniendo ubicación y enviando datos.</p>';
-  try {
-    var geo = await obtenerGeo();
-    var r = await api('polEscanear', TOKEN, codigo, geo, navigator.userAgent);
-    QR_PENDIENTE = ''; limpiarUrl();
-    mostrarResultado(r);
-  } catch (e) {
-    if (!e.silent) $('#resBox').innerHTML = '<div class="res-ico">❌</div><h2>No se registró</h2><p>' + esc(e.message) + '</p>';
-    QR_PENDIENTE = ''; limpiarUrl();
-  } finally { PROCESANDO = false; }
+  CODIGO = codigo; QR_PENDIENTE = ''; limpiarUrl();
+  $('#gpsIco').textContent = '📍'; $('#gpsTit').textContent = 'Código QR leído';
+  $('#gpsTxt').textContent = 'Para registrar el punto debe confirmar que está en el lugar. Presione el botón para activar su GPS.';
+  $('#gpsBtn').disabled = false; $('#gpsBtn').innerHTML = '📍 ACTIVAR GPS'; $('#gpsInfo').textContent = '';
+  mostrar('vGps');
 }
+function cancelarRegistro() { detenerCamara(); CODIGO = ''; irHome(); }
+
+async function activarGps() {
+  if (PROCESANDO) return;
+  PROCESANDO = true;
+  var btn = $('#gpsBtn'); btn.disabled = true; btn.innerHTML = '⏳ Obteniendo ubicación...';
+  $('#gpsIco').textContent = '🛰️';
+  try {
+    GEO = await obtenerGeoPreciso(function (g) { $('#gpsInfo').textContent = 'Precisión actual: ±' + Math.round(g.acc) + ' m'; });
+    $('#gpsInfo').textContent = 'Ubicación obtenida (±' + Math.round(GEO.acc) + ' m). Verificando el punto...';
+    btn.innerHTML = '⏳ Verificando...';
+    RESP = await api('polEscanear', TOKEN, CODIGO, GEO, navigator.userAgent);
+    PROCESANDO = false;
+    siguientePaso();
+  } catch (e) {
+    PROCESANDO = false;
+    if (e.silent) return;
+    var m = e.message || '';
+    btn.disabled = false; btn.innerHTML = '📍 REINTENTAR GPS';
+    if (m === 'PERMISO') {
+      $('#gpsIco').textContent = '🚫'; $('#gpsTit').textContent = 'Permiso de ubicación denegado';
+      $('#gpsTxt').innerHTML = 'Active la ubicación del celular y permita el acceso: toque el <b>candado 🔒</b> junto a la dirección → <b>Permisos → Ubicación → Permitir</b>. Luego presione reintentar.';
+    } else if (m.indexOf('GPS_IMPRECISO') === 0 || m.indexOf('GPS_REQUERIDO') === 0) {
+      $('#gpsIco').textContent = '📡'; $('#gpsTit').textContent = 'Señal GPS insuficiente';
+      $('#gpsTxt').textContent = m.replace(/^GPS_\w+:\s*/, '');
+    } else {
+      $('#gpsIco').textContent = '❌'; $('#gpsTit').textContent = 'No se registró';
+      $('#gpsTxt').textContent = m;
+      if (/QR no válido|no pertenece/.test(m)) { btn.innerHTML = 'Volver'; btn.onclick = function () { btn.onclick = activarGps; irHome(); }; }
+    }
+  }
+}
+
+function siguientePaso() {
+  if (RESP && RESP.retos && RESP.retos.length) { RETOS = RESP.retos.slice(); abrirReto(); }
+  else mostrarResultado(RESP);
+}
+
+/* ---------- PASO 3: foto EN VIVO (sin galería) ---------- */
+async function abrirReto() {
+  var r = RETOS[0];
+  mostrar('vFoto');
+  $('#retoN').textContent = RESP.totalRetos > 1 ? '(' + (r.indice + 1) + ' de ' + RESP.totalRetos + ')' : '';
+  $('#retoTit').textContent = { FRENTE: 'HACIA ADELANTE', DERECHA: 'HACIA SU DERECHA', IZQUIERDA: 'HACIA SU IZQUIERDA', ATRAS: 'HACIA ATRÁS' }[r.codigo] || r.codigo;
+  $('#retoTxt').textContent = r.texto;
+  $('#camErr').hidden = true; $('#camPrev').hidden = true; $('#camBtns').hidden = false;
+  $('#camCan').hidden = true; $('#camVid').hidden = false; $('#camLive').hidden = false; FOTO_DATA = null;
+  iniciarCuenta(RESP.segundosRestantes || 120);
+  try {
+    detenerCamara();
+    STREAM = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: r.camara || 'environment' }, width: { ideal: 1280 }, height: { ideal: 960 } } });
+    var v = $('#camVid'); v.srcObject = STREAM; await v.play();
+  } catch (e) {
+    $('#camErr').hidden = false;
+    $('#camErr').innerHTML = 'No se pudo abrir la cámara. Permita el acceso: candado 🔒 junto a la dirección → <b>Permisos → Cámara → Permitir</b> y vuelva a escanear el QR.';
+    $('#camBtns').hidden = true;
+  }
+}
+function iniciarCuenta(seg) {
+  clearInterval(CD_TIMER);
+  LIMITE = Date.now() + seg * 1000;
+  var tick = function () {
+    var s = Math.max(0, Math.round((LIMITE - Date.now()) / 1000));
+    $('#camCd').textContent = '⏱ ' + Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+    if (s <= 0) {
+      clearInterval(CD_TIMER); detenerCamara();
+      $('#camBtns').hidden = true; $('#camPrev').hidden = true;
+      $('#camErr').hidden = false; $('#camErr').innerHTML = '⏱ Se agotó el tiempo para la foto. El punto quedó <b>SIN FOTO</b>. Vuelva a escanear el QR para intentarlo de nuevo.<br><button class="btn btn-sm mt" onclick="irHome()">Volver</button>';
+    }
+  };
+  tick(); CD_TIMER = setInterval(tick, 500);
+}
+function detenerCamara() { if (STREAM) { STREAM.getTracks().forEach(function (t) { t.stop(); }); STREAM = null; } }
+
+function capturar() {
+  var v = $('#camVid');
+  if (!v.videoWidth) { toast('La cámara aún no está lista.', 'err'); return; }
+  var W = Math.min(1280, v.videoWidth), H = Math.round(v.videoHeight * W / v.videoWidth);
+  var c = $('#camCan'); c.width = W; c.height = H;
+  var g = c.getContext('2d'); g.drawImage(v, 0, 0, W, H);
+  // Sello de agua con los datos del registro (no se puede editar después)
+  var e = RESP.escaneo, r = RETOS[0], fs = Math.max(16, Math.round(W / 42));
+  var lineas = ['QR ' + e.qrNumero + ' · ' + e.qrNombre + ' · Reto: ' + r.codigo,
+    new Date().toLocaleString('es-EC') + ' · ' + (USER.grado + ' ' + USER.nombres),
+    'GPS ' + Number(GEO.lat).toFixed(6) + ', ' + Number(GEO.lng).toFixed(6) + ' (±' + Math.round(GEO.acc) + ' m) · a ' + e.distanciaM + ' m del QR'];
+  var bh = fs * 1.45 * lineas.length + fs;
+  g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(0, H - bh, W, bh);
+  g.fillStyle = '#fff'; g.font = '600 ' + fs + 'px system-ui,Arial';
+  lineas.forEach(function (l, i) { g.fillText(l, fs * .6, H - bh + fs * 1.3 + i * fs * 1.45); });
+  FOTO_DATA = c.toDataURL('image/jpeg', 0.78);
+  v.hidden = true; c.hidden = false; $('#camLive').hidden = true;
+  $('#camBtns').hidden = true; $('#camPrev').hidden = false;
+}
+function repetirFoto() {
+  FOTO_DATA = null; $('#camCan').hidden = true; $('#camVid').hidden = false; $('#camLive').hidden = false;
+  $('#camBtns').hidden = false; $('#camPrev').hidden = true;
+}
+async function enviarFoto() {
+  if (!FOTO_DATA) return;
+  await run($('#btnEnviarFoto'), async function () {
+    var r = await api('polSubirFoto', TOKEN, RESP.escaneo.id, RETOS[0].codigo, FOTO_DATA);
+    RESP = r; FOTO_DATA = null;
+    if (r.retos && r.retos.length) { RETOS = r.retos.slice(); abrirReto(); }
+    else { clearInterval(CD_TIMER); detenerCamara(); mostrarResultado(r); }
+  });
+}
+
+/* ---------- resultado ---------- */
 function mostrarResultado(r) {
   var e = r.escaneo;
-  var ico = r.duplicado ? 'ℹ️' : (e.alerta || e.ordenCorrecto === 'NO' || e.estadoHora === 'ATRASADO' || e.estadoHora === 'ADELANTADO') ? '⚠️' : '✅';
+  mostrar('vRes');
+  if (e.validez === 'NO VALIDO') {
+    $('#resBox').innerHTML = '<div class="res-ico">❌</div><h2>Escaneo NO VÁLIDO</h2><p class="muted">QR ' + esc(e.qrNumero) + ' · ' + esc(e.qrNombre) + '</p>' +
+      '<div class="banner" style="background:var(--rojo2);border-color:#f3b6b6;color:#8a1f1f;text-align:left">' + esc(e.motivo) +
+      '<br>El intento quedó registrado con su ubicación real. Para que el punto cuente debe escanear <b>estando en el lugar</b>.</div>';
+    if (navigator.vibrate) navigator.vibrate([120, 80, 120]);
+    return;
+  }
+  var ok = e.validez === 'VALIDO';
+  var aviso = e.ordenCorrecto === 'NO' || e.estadoHora === 'ATRASADO' || e.estadoHora === 'ADELANTADO';
+  var ico = r.duplicado ? 'ℹ️' : (ok ? (aviso ? '⚠️' : '✅') : '⏳');
   var dif = e.minutosDif === '' || e.minutosDif == null ? '' : ' (' + (Number(e.minutosDif) > 0 ? '+' : '') + e.minutosDif + ' min)';
   var html = '<div class="res-ico">' + ico + '</div><h2>QR ' + esc(e.qrNumero) + ' · ' + esc(e.qrNombre) + '</h2><p class="muted">' + esc(r.mensaje) + '</p>' +
     '<div style="text-align:left">' +
+    '<div class="kv"><span>Estado</span>' + (ok ? '<span class="badge b-ok">VÁLIDO</span>' : '<span class="badge b-warn">' + esc(e.validez) + '</span>') + '</div>' +
     '<div class="kv"><span>Hora de registro</span><b>' + esc(e.hora) + '</b></div>' +
     '<div class="kv"><span>Hora programada</span><span>' + esc(e.horaEsperada || '—') + dif + ' ' + badge(e.estadoHora) + '</span></div>' +
+    '<div class="kv"><span>Ubicación</span><span>a ' + esc(e.distanciaM) + ' m del QR ✔</span></div>' +
+    (e.nFotos ? '<div class="kv"><span>Foto de evidencia</span><span class="badge b-ok">Recibida</span></div>' : '') +
     (e.mallaNombre ? '<div class="kv"><span>Malla</span><span>' + esc(e.mallaNombre) + ' · punto ' + esc(e.ordenEsperado) + '</span></div>' : '<div class="kv"><span>Malla</span><span>Escaneo libre</span></div>') +
     (e.ordenCorrecto ? '<div class="kv"><span>Orden</span>' + (e.ordenCorrecto === 'SI' ? '<span class="badge b-ok">Correcto</span>' : '<span class="badge b-bad">Fuera de orden</span>') + '</div>' : '') +
-    (e.alerta ? '<div class="kv"><span>Alerta</span><span class="badge b-bad">' + esc(e.alerta) + '</span></div>' : '') +
     '</div>';
-  if (r.siguiente) {
+  if (ok && r.siguiente) {
     html += '<div class="card mt" style="text-align:left;background:var(--azul3)"><b>Siguiente punto:</b><br>QR ' + r.siguiente.qrNumero + ' · ' + esc(r.siguiente.qrNombre) + (r.siguiente.hora ? ' a las <b>' + r.siguiente.hora + '</b>' : '') +
       '<br><a class="btn btn-sm mt" target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=' + r.siguiente.lat + ',' + r.siguiente.lng + '">🧭 Cómo llegar</a></div>';
-  } else if (e.mallaId) {
-    html += '<div class="card mt b-ok" style="background:var(--verde2)"><b>🎉 Completó todos los puntos de su malla.</b></div>';
+  } else if (ok && e.mallaId) {
+    html += '<div class="card mt" style="background:var(--verde2)"><b>🎉 Completó todos los puntos de su malla.</b></div>';
   }
   $('#resBox').innerHTML = html;
   if (navigator.vibrate) navigator.vibrate(ico === '✅' ? 120 : [80, 60, 80]);

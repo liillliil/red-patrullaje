@@ -30,8 +30,21 @@
     .kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--borde);font-size:14px;gap:10px}
     .kv span:first-child{color:var(--gris)}
     .banner{background:var(--ambar2);color:#6b4b00;border:1px solid #f0d58a;padding:10px 12px;border-radius:10px;margin-bottom:12px;font-size:13px}
-    .file-btn{position:relative;overflow:hidden}
-    .file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+    .paso{display:flex;gap:10px;justify-content:center;margin:4px 0 16px}
+    .paso span{width:34px;height:6px;border-radius:4px;background:#d5dbe7}
+    .paso span.on{background:var(--azul2)}
+    .gps-ico{font-size:72px;text-align:center;line-height:1}
+    .big-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:22px;border:0;border-radius:16px;font-size:21px;font-weight:800;color:#fff;cursor:pointer;background:linear-gradient(135deg,#15925a,#1fb46f);box-shadow:0 8px 22px rgba(21,146,90,.35)}
+    .big-btn:disabled{opacity:.6}
+    .reto{background:#fff3c4;border:2px solid #e0a100;border-radius:14px;padding:12px 14px;margin-bottom:10px}
+    .reto b{display:block;font-size:22px;color:#7a5200}
+    .reto span{font-size:15px;color:#4a3a10}
+    .cam{position:relative;width:100%;aspect-ratio:3/4;background:#000;border-radius:16px;overflow:hidden}
+    .cam video,.cam canvas{width:100%;height:100%;object-fit:cover;display:block}
+    .cam canvas{object-fit:contain;background:#000}
+    .cam .cd{position:absolute;top:10px;right:10px;background:#000a;color:#fff;font-weight:700;padding:6px 12px;border-radius:20px;font-size:16px}
+    .cam .live{position:absolute;top:10px;left:10px;background:#cf3b3b;color:#fff;font-weight:700;padding:4px 10px;border-radius:20px;font-size:13px}
+    .shutter{width:78px;height:78px;border-radius:50%;border:6px solid #fff;background:#cf3b3b;box-shadow:0 0 0 4px #0b2e6b;cursor:pointer;display:block;margin:14px auto 4px}
   </style>
 </head>
 <body>
@@ -48,6 +61,7 @@
       <div class="field"><label>Clave</label><input id="lgPass" type="password" autocomplete="current-password" required></div>
       <button class="btn btn-primary btn-block btn-xl" id="lgBtn">Ingresar</button>
     </form>
+    <p class="small muted center mt">Primer ingreso: use su <b>cédula</b> como usuario y como clave.</p>
     <div class="row mt" style="justify-content:space-between">
       <button class="link" onclick="doRecuperar()">Olvidé mi clave</button>
       <button class="link" onclick="abrirRegistro()">Registrarme</button>
@@ -64,7 +78,7 @@
       <div class="field"><label>Cédula (9 o 10 dígitos)</label><input id="rgCed" inputmode="numeric" maxlength="10" required onblur="this.value=normCedula(this.value)"></div>
       <div class="field"><label>Grado</label><select id="rgGrado" required></select></div>
       <div class="field"><label>Apellidos y nombres</label><input id="rgNom" required></div>
-      <div class="field"><label>Correo electrónico (recibirá su clave)</label><input id="rgMail" type="email" required></div>
+      <div class="field"><label>Correo electrónico (opcional)</label><input id="rgMail" type="email"></div>
       <div class="field"><label>Teléfono celular</label><input id="rgTel" inputmode="tel"></div>
       <div class="field"><label>Distrito / Servicio</label><select id="rgDist" required></select></div>
       <button class="btn btn-primary btn-block btn-xl" id="rgBtn">Enviar registro</button>
@@ -78,9 +92,9 @@
   <div class="login-card">
     <div class="logo">🔑</div>
     <h1>Cree su clave</h1>
-    <div class="sub">Reemplace la clave temporal que recibió por correo.</div>
+    <div class="sub">Por seguridad debe reemplazar la clave inicial (su cédula).</div>
     <form onsubmit="doCambio(event)">
-      <div class="field"><label>Clave temporal</label><input id="cbAct" type="password" required></div>
+      <div class="field"><label>Clave actual (su cédula)</label><input id="cbAct" type="password" required></div>
       <div class="field"><label>Nueva clave (mín. 8, letras y números)</label><input id="cbNew" type="password" required></div>
       <div class="field"><label>Repita la nueva clave</label><input id="cbNew2" type="password" required></div>
       <button class="btn btn-primary btn-block btn-xl" id="cbBtn">Guardar</button>
@@ -108,11 +122,36 @@
   <div class="wrap">
     <div id="reader"></div>
     <div id="scanErr" class="banner mt" hidden></div>
-    <div class="card mt">
-      <label>¿No abre la cámara? Tome una foto del QR</label>
-      <div class="btn btn-block file-btn">📸 Tomar / elegir foto del QR<input type="file" accept="image/*" capture="environment" onchange="escanearFoto(this)"></div>
-      <div class="mt"><label>O ingrese el código impreso bajo el QR</label><div class="row"><input id="scManual" class="grow" placeholder="Código" style="width:auto"><button class="btn btn-primary" onclick="procesar(document.getElementById('scManual').value)">Registrar</button></div></div>
+    <p class="small muted center mt">Apunte la cámara posterior al código QR pegado en el punto.</p>
+  </div>
+</div>
+
+<!-- PASO 2: ACTIVAR GPS -->
+<div id="vGps" hidden>
+  <div class="hdr"><div><b>Paso 2 de 3 · Ubicación</b><small>Verificación de presencia en el punto</small></div><button class="btn btn-sm" onclick="cancelarRegistro()">✕</button></div>
+  <div class="wrap">
+    <div class="paso"><span class="on"></span><span class="on"></span><span></span></div>
+    <div class="card center">
+      <div class="gps-ico" id="gpsIco">📍</div>
+      <h2 style="margin:10px 0 6px" id="gpsTit">Código QR leído</h2>
+      <p class="muted" id="gpsTxt">Para registrar el punto debe confirmar que está en el lugar. Presione el botón para activar su GPS.</p>
+      <button class="big-btn mt" id="gpsBtn" onclick="activarGps()">📍 ACTIVAR GPS</button>
+      <div id="gpsInfo" class="small muted mt"></div>
     </div>
+    <div class="banner small">🔒 Su ubicación solo se usa para validar este punto. Debe estar a menos de la distancia permitida del código QR.</div>
+  </div>
+</div>
+
+<!-- PASO 3: FOTO EN VIVO -->
+<div id="vFoto" hidden>
+  <div class="hdr"><div><b>Paso 3 de 3 · Foto de evidencia</b><small>Solo cámara en vivo</small></div></div>
+  <div class="wrap">
+    <div class="paso"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+    <div class="reto"><span>📸 Reto asignado al azar <span id="retoN"></span></span><b id="retoTit"></b><span id="retoTxt"></span></div>
+    <div class="cam"><video id="camVid" playsinline muted autoplay></video><canvas id="camCan" hidden></canvas><span class="live" id="camLive">● EN VIVO</span><span class="cd" id="camCd"></span></div>
+    <div id="camBtns"><button class="shutter" id="shutter" onclick="capturar()" aria-label="Tomar foto"></button><div class="small muted center">Toque el botón rojo para tomar la foto</div></div>
+    <div id="camPrev" class="row mt" hidden><button class="btn grow" onclick="repetirFoto()">↺ Repetir</button><button class="btn btn-ok grow" id="btnEnviarFoto" onclick="enviarFoto()">✔ Enviar foto</button></div>
+    <div id="camErr" class="banner mt" hidden></div>
   </div>
 </div>
 

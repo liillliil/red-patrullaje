@@ -50,7 +50,9 @@ function toast(msg, tipo, ms) {
   var d = document.createElement('div');
   d.className = 'toast ' + (tipo || '');
   d.textContent = msg;
-  $('#toast').appendChild(d);
+  var cont = $('#toast');
+  while (cont.children.length >= 3) cont.removeChild(cont.firstChild);
+  cont.appendChild(d);
   setTimeout(function () { d.remove(); }, ms || (tipo === 'err' ? 6000 : 3500));
 }
 

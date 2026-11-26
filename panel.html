@@ -29,6 +29,15 @@
     .pt-list .pt{display:grid;grid-template-columns:34px 1fr 110px 110px;gap:8px;align-items:center;padding:6px;border-bottom:1px solid var(--borde)}
     .chk-list{max-height:260px;overflow:auto;border:1px solid var(--borde);border-radius:8px;padding:6px}
     .chk-list label{display:flex;gap:8px;align-items:center;font-weight:400;color:var(--texto);font-size:13px;padding:4px;margin:0;cursor:pointer}
+    .asig-bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid var(--borde);border-radius:var(--radio);padding:10px 14px;margin-bottom:10px}
+    .leyenda-asig{display:flex;gap:16px;font-size:13px;color:var(--gris)}
+    .leyenda-asig span{display:flex;align-items:center;gap:6px}
+    .sw{display:inline-block;width:16px;height:16px;border-radius:4px;border:1px solid var(--borde)}
+    .sw0{background:#fff}.sw1{background:#dcf3e6;border-color:#9fd9b8}.sw2{background:#e9e1fb;border-color:#bca8ee}
+    tr.a1 td{background:#eef9f3}tr.a2 td{background:#f3eefd}
+    tr.a1 td:first-child{box-shadow:inset 5px 0 0 #15925a}tr.a2 td:first-child{box-shadow:inset 5px 0 0 #7b4fd6}
+    .mchip{display:inline-block;background:#fff;border:1px solid var(--borde);border-radius:8px;padding:2px 8px;margin:2px 4px 2px 0;font-size:12px;white-space:nowrap}
+    .mchip b{color:var(--azul)}
     .cell-ok{background:var(--verde2)} .cell-warn{background:var(--ambar2)} .cell-bad{background:var(--rojo2)}
     @media (max-width:900px){
       .app{grid-template-columns:1fr}
@@ -63,9 +72,9 @@
   <div class="login-card">
     <div class="logo">🔑</div>
     <h1>Cambie su clave</h1>
-    <div class="sub">Por seguridad debe reemplazar la clave temporal.</div>
+    <div class="sub">Por seguridad debe reemplazar la clave inicial (su cédula).</div>
     <form onsubmit="doCambio(event)">
-      <div class="field"><label>Clave temporal / actual</label><input id="cbAct" type="password" required></div>
+      <div class="field"><label>Clave actual (su cédula)</label><input id="cbAct" type="password" required></div>
       <div class="field"><label>Nueva clave (mín. 8, letras y números)</label><input id="cbNew" type="password" required></div>
       <div class="field"><label>Repita la nueva clave</label><input id="cbNew2" type="password" required></div>
       <button class="btn btn-primary btn-block" id="cbBtn">Guardar y continuar</button>
@@ -165,9 +174,16 @@
         <div data-only-super><label>Distrito / Servicio</label><select id="uDist" onchange="cargarUsuarios()"></select></div>
         <div data-only-super><label>Rol</label><select id="uRol" onchange="cargarUsuarios()"><option value="">Todos</option><option>SUPERADMIN</option><option>ADMIN</option><option>POLICIA</option></select></div>
         <div><label>Estado</label><select id="uEstado" onchange="cargarUsuarios()"><option value="">Todos</option><option>ACTIVO</option><option>PENDIENTE</option><option>INACTIVO</option></select></div>
-        <div><label>Buscar</label><input id="uBuscar" placeholder="Cédula, nombre o correo" oninput="renderUsuarios()"></div>
+        <div><label>Asignación</label><select id="uAsig" onchange="renderUsuarios()"><option value="">Todas</option><option value="0">⚪ Sin malla</option><option value="1">🟢 1 malla</option><option value="2">🟣 2 o más mallas</option></select></div>
+        <div><label>Buscar</label><input id="uBuscar" placeholder="Cédula o nombre" oninput="renderUsuarios()"></div>
         <div class="grow"></div>
         <button class="btn btn-primary" onclick="formUsuario()">+ Nuevo usuario</button>
+      </div>
+      <div class="asig-bar">
+        <div class="leyenda-asig"><span><i class="sw sw0"></i>Sin malla</span><span><i class="sw sw1"></i>1 malla</span><span><i class="sw sw2"></i>2 o más mallas</span></div>
+        <div class="row"><span class="small muted" id="uSelN">0 seleccionados</span>
+          <button class="btn btn-sm btn-primary" onclick="asignarSeleccionados()">📅 Asignar a malla(s)</button>
+          <button class="btn btn-sm btn-danger" onclick="limpiarSeleccionados()">🧹 Limpiar asignaciones</button></div>
       </div>
       <div id="uTabla"></div>
     </section>

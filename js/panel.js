@@ -39,6 +39,25 @@ function badgeHora(e) {
 function badgeEstado(e) {
   return '<span class="badge ' + ({ ACTIVO: 'b-ok', PENDIENTE: 'b-warn', INACTIVO: 'b-bad' }[e] || 'b-gray') + '">' + esc(e) + '</span>';
 }
+function badgeValidez(v) {
+  var c = { 'VALIDO': 'b-ok', 'NO VALIDO': 'b-bad', 'SIN FOTO': 'b-bad', 'PENDIENTE FOTO': 'b-warn' }[v] || 'b-gray';
+  return '<span class="badge ' + c + '">' + esc(v === 'VALIDO' ? 'VÁLIDO' : v === 'NO VALIDO' ? 'NO VÁLIDO' : v) + '</span>';
+}
+function fotoVigente(e) { return !CFG.limiteFotos || String(e.fecha || e.fechaHora || '').slice(0, 10) >= CFG.limiteFotos; }
+function btnFoto(e) {
+  if (!e.nFotos) return '';
+  return fotoVigente(e) ? '<button class="btn btn-sm" onclick="verFoto(\'' + e.id + '\',0)">📷 Foto</button>' : '<span class="small muted" title="Las fotos se conservan ' + (CFG.fotosDias || 10) + ' días">🗑 foto caducada</span>';
+}
+async function verFoto(id, idx) {
+  try {
+    toast('Cargando foto...');
+    var f = await apiT('fotoVer', id, idx || 0);
+    modal('Foto de evidencia', '<div class="mb"><span class="badge b-warn">Reto: ' + esc(f.reto) + '</span> <span class="small muted">' + esc(f.retoTexto) + '</span></div>' +
+      '<img src="' + f.dataUrl + '" style="width:100%;border-radius:10px;display:block">' +
+      (f.total > 1 ? '<div class="row mt">' + Array.from({ length: f.total }, function (_, i) { return '<button class="btn btn-sm" onclick="verFoto(\'' + id + '\',' + i + ')">Foto ' + (i + 1) + '</button>'; }).join('') + '</div>' : '') +
+      '<p class="small muted mt">Recibida: ' + esc(f.fotoHora) + ' · tomada en vivo desde la app (sin galería). Se eliminará automáticamente a los ' + (CFG.fotosDias || 10) + ' días.</p>');
+  } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+}
 function difTxt(d) { if (d === '' || d == null) return ''; d = Number(d); return (d > 0 ? '+' : '') + d + ' min'; }
 function tabla(cols, filas, vacio) {
   if (!filas.length) return '<div class="card muted center">' + (vacio || 'Sin registros') + '</div>';
@@ -144,10 +163,10 @@ async function cargarDash() {
   try {
     var d = await apiT('dashboard', val('#dDist'));
     $('#dHora').textContent = 'Actualizado ' + new Date().toLocaleTimeString();
-    var st = [['QR activos', d.qrs], ['Servidores activos', d.policias], ['Patrullando hoy', d.patrullandoHoy], ['Escaneos hoy', d.escaneosHoy], ['Mallas hoy', d.mallasHoy.length], ['Alertas hoy', d.alertasHoy], ['Registros pendientes', d.pendientes]];
+    var st = [['QR activos', d.qrs], ['Servidores activos', d.policias], ['Patrullando hoy', d.patrullandoHoy], ['Escaneos hoy', d.escaneosHoy], ['Mallas hoy', d.mallasHoy.length], ['No válidos hoy', d.alertasHoy], ['Registros pendientes', d.pendientes]];
     $('#dStats').innerHTML = st.map(function (s) { return '<div class="stat"><div class="n">' + s[1] + '</div><div class="l">' + s[0] + '</div></div>'; }).join('');
-    $('#dMallas').innerHTML = tabla(['Malla', 'Distrito', 'Ruta', 'Asignados', 'Cumplimiento', ''], d.mallasHoy.map(function (m) {
-      return ['<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span>', esc(m.distritoNombre), '<span class="small">' + esc(m.resumen) + '</span>', '<span class="small">' + esc(m.asignados.join(', ')) + '</span>',
+    $('#dMallas').innerHTML = tabla(['Malla', 'Distrito', 'Horario', 'Ruta', 'Asignados', 'Cumplimiento', ''], d.mallasHoy.map(function (m) {
+      return ['<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span>', esc(m.distritoNombre), '<b>' + esc(m.horario) + '</b>', '<span class="small">' + esc(m.resumen) + '</span>', '<span class="small">' + m.nAsignados + ' servidores</span>',
         '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>',
         '<button class="btn btn-sm" onclick="verCumplimiento(\'' + m.id + '\')">Detalle</button>'];
     }), 'No hay mallas programadas para hoy.');
@@ -156,29 +175,31 @@ async function cargarDash() {
 }
 
 function tablaEscaneos(list, corto) {
-  var cols = corto ? ['Hora', 'Servidor', 'QR / Lugar', 'Malla', 'Programado', 'Estado', 'Orden', 'Alerta']
-    : ['Fecha / hora', 'Servidor', 'Cédula', 'QR / Lugar', 'Coordenadas', 'Malla', 'Orden esp.', 'Programado', 'Dif.', 'Estado', 'Orden OK', 'GPS (m)', 'Alerta'];
+  var cols = corto ? ['Hora', 'Servidor', 'QR / Lugar', 'Validez', 'Programado', 'Estado', 'Orden', '']
+    : ['Fecha / hora', 'Servidor', 'Cédula', 'QR / Lugar', 'Validez', 'GPS del celular', 'Malla', 'Programado', 'Dif.', 'Estado', 'Orden OK', 'Evidencia'];
   return tabla(cols, list.map(function (e) {
     var serv = '<b>' + esc(e.grado + ' ' + e.nombres) + '</b>';
     var qr = '<b>QR ' + esc(e.qrNumero) + '</b> ' + esc(e.qrNombre);
     var ord = e.ordenCorrecto === 'SI' ? '<span class="badge b-ok">SÍ</span>' : e.ordenCorrecto === 'NO' ? '<span class="badge b-bad">NO</span>' : '';
-    var al = e.alerta ? '<span class="badge b-bad">⚠ ' + esc(e.alerta) + '</span>' : '';
-    if (corto) return [e.hora, serv, qr, esc(e.mallaNombre || 'Libre'), esc(e.horaEsperada || '-'), badgeHora(e.estadoHora) + ' <span class="small muted">' + difTxt(e.minutosDif) + '</span>', ord, al];
-    return [esc(e.fechaHora), serv, esc(e.cedula), qr, '<a target="_blank" href="https://www.google.com/maps?q=' + e.lat + ',' + e.lng + '">' + Number(e.lat).toFixed(5) + ', ' + Number(e.lng).toFixed(5) + '</a>',
-      esc(e.mallaNombre || 'Libre'), esc(e.ordenEsperado), esc(e.horaEsperada || '-'), difTxt(e.minutosDif), badgeHora(e.estadoHora), ord, esc(e.distanciaM), al];
+    var val = badgeValidez(e.validez) + (e.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(e.motivo) + '</div>' : '') + (e.alerta ? '<div class="small muted">' + esc(e.alerta) + '</div>' : '');
+    var gps = e.latDispositivo ? '<a target="_blank" href="https://www.google.com/maps?q=' + e.latDispositivo + ',' + e.lngDispositivo + '">a ' + esc(e.distanciaM) + ' m</a> <span class="small muted">±' + esc(e.precisionM) + '</span>' : '—';
+    if (corto) return [e.hora, serv, qr, val, esc(e.horaEsperada || '-'), badgeHora(e.estadoHora) + ' <span class="small muted">' + difTxt(e.minutosDif) + '</span>', ord, btnFoto(e)];
+    return [esc(e.fechaHora), serv, esc(e.cedula), qr, val, gps, esc(e.mallaNombre || 'Libre'), esc(e.horaEsperada || '-'), difTxt(e.minutosDif), badgeHora(e.estadoHora), ord, btnFoto(e) || '<span class="small muted">' + (e.retos ? 'sin foto' : '—') + '</span>'];
   }), 'Sin escaneos.');
 }
 
 /* ---------------- MAPAS (Google Maps) ---------------- */
 function popupEsc(e) {
-  return '<div class="pop"><b>' + esc(e.grado + ' ' + e.nombres) + '</b><br>CI: ' + esc(e.cedula) +
+  return '<div class="pop"><div style="margin-bottom:4px">' + badgeValidez(e.validez) + '</div><b>' + esc(e.grado + ' ' + e.nombres) + '</b><br>CI: ' + esc(e.cedula) +
     '<br><b>QR ' + esc(e.qrNumero) + '</b> – ' + esc(e.qrNombre) +
     '<br>🕒 ' + esc(e.fechaHora) +
     (e.mallaNombre ? '<br>Malla: ' + esc(e.mallaNombre) + ' · orden ' + esc(e.ordenEsperado) : '<br>Escaneo libre') +
     '<br>Programado: ' + esc(e.horaEsperada || '-') + ' ' + badgeHora(e.estadoHora) + ' ' + difTxt(e.minutosDif) +
     (e.ordenCorrecto ? '<br>Orden correcto: ' + e.ordenCorrecto : '') +
-    (e.distanciaM !== '' ? '<br>GPS celular a ' + esc(e.distanciaM) + ' m' : '') +
-    (e.alerta ? '<br><span class="badge b-bad">⚠ ' + esc(e.alerta) + '</span>' : '') +
+    (e.distanciaM !== '' ? '<br>📱 Celular a <b>' + esc(e.distanciaM) + ' m</b> del QR (±' + esc(e.precisionM) + ' m)' : '') +
+    (e.motivo ? '<br><span style="color:#cf3b3b;font-weight:600">' + esc(e.motivo) + '</span>' : '') +
+    (e.alerta ? '<br><span class="badge b-warn">' + esc(e.alerta) + '</span>' : '') +
+    (e.nFotos ? (fotoVigente(e) ? '<br><button class="btn btn-sm" style="margin-top:6px" onclick="verFoto(\'' + e.id + '\',0)">📷 Ver foto de evidencia</button>' : '<br><span class="small muted">🗑 Foto caducada (' + (CFG.fotosDias || 10) + ' días)</span>') : '') +
     '<br><a target="_blank" href="https://www.google.com/maps?q=' + e.lat + ',' + e.lng + '">Abrir en Google Maps</a></div>';
 }
 function toggleCapa(tipo, i, on) {
@@ -211,17 +232,29 @@ async function consultarMapa(btn) {
     orden.forEach(function (uid, i) {
       var color = COLORES[i % COLORES.length], lg = new Capa();
       var pts = grupos[uid].slice().sort(function (a, b) { return a.fechaHora < b.fechaHora ? -1 : 1; });
-      var porDia = {};
-      pts.forEach(function (e) { (porDia[e.fecha] = porDia[e.fecha] || []).push([Number(e.lat), Number(e.lng)]); });
-      Object.keys(porDia).forEach(function (k) { if (porDia[k].length > 1) lg.add(gmLinea(porDia[k], color, 3, true, true)); });
-      pts.forEach(function (e, k) {
+      var porDia = {}, k = 0, malos = 0;
+      pts.filter(function (e) { return e.validez === 'VALIDO'; }).forEach(function (e) { (porDia[e.fecha] = porDia[e.fecha] || []).push([Number(e.lat), Number(e.lng)]); });
+      Object.keys(porDia).forEach(function (d) { if (porDia[d].length > 1) lg.add(gmLinea(porDia[d], color, 3, true, true)); });
+      pts.forEach(function (e) {
         bounds.push([Number(e.lat), Number(e.lng)]);
-        if (e.latDispositivo) lg.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, color, 9, 'GPS del celular (' + e.distanciaM + ' m del QR)', null, '#fff'));
-        lg.add(gmNum(map, e.lat, e.lng, k + 1, color, popupEsc(e), e.hora + ' · QR ' + e.qrNumero));
+        if (e.validez === 'VALIDO') {
+          k++;
+          lg.add(gmNum(map, e.lat, e.lng, k, color, popupEsc(e), e.hora + ' · QR ' + e.qrNumero + ' · VÁLIDO'));
+        } else {
+          malos++;
+          var rojo = e.validez === 'PENDIENTE FOTO' ? '#c98a00' : '#cf3b3b';
+          lg.add(gmNum(map, e.lat, e.lng, '✕', rojo, popupEsc(e), e.hora + ' · QR ' + e.qrNumero + ' · ' + e.validez));
+          if (e.latDispositivo) {
+            // dónde estaba realmente el celular
+            lg.add(gmLinea([[e.lat, e.lng], [e.latDispositivo, e.lngDispositivo]], rojo, 2, true, false));
+            lg.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, rojo, 16, 'Ubicación real del celular (' + e.distanciaM + ' m del QR)', popupEsc(e), '#fff'));
+            if (Number(e.distanciaM) < 20000) bounds.push([Number(e.latDispositivo), Number(e.lngDispositivo)]);
+          }
+        }
       });
       lg.setMap(map);
       var p = pts[0], nombre = p.grado + ' ' + p.nombres;
-      LEY.esc.push({ layer: lg, color: color, on: true, html: '<b>' + esc(nombre) + '</b><br><span class="muted">CI ' + esc(p.cedula) + ' · ' + pts.length + ' escaneos · ' + pts[0].hora + '–' + pts[pts.length - 1].hora + '</span>' });
+      LEY.esc.push({ layer: lg, color: color, on: true, html: '<b>' + esc(nombre) + '</b><br><span class="muted">CI ' + esc(p.cedula) + ' · ' + k + ' válidos' + (malos ? ' · <span style="color:#cf3b3b;font-weight:700">' + malos + ' no válidos</span>' : '') + ' · ' + pts[0].hora + '–' + pts[pts.length - 1].hora + '</span>' });
     });
     renderLeyenda('esc', '#mLeyenda');
     if (!bounds.length) r.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); });
@@ -244,7 +277,7 @@ function dibujarCobertura() {
   map.__info.close();
   limpiarCapas('cob');
   var escPorPunto = {};
-  COB_DATA.escaneos.forEach(function (e) { if (e.puntoId) escPorPunto[e.puntoId] = (escPorPunto[e.puntoId] || 0) + 1; });
+  COB_DATA.escaneos.forEach(function (e) { if (e.puntoId && e.validez === 'VALIDO') escPorPunto[e.puntoId] = (escPorPunto[e.puntoId] || 0) + 1; });
   var unicos = {};
   var capasMalla = COB_DATA.mallas.map(function (m, i) {
     var color = COLORES[i % COLORES.length], lg = new Capa();
@@ -275,9 +308,13 @@ function dibujarCobertura() {
   if (allOn) { lAll.setMap(map); COB_DATA.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); }); }
   LEY.cob.push({ layer: lAll, color: '#777', on: allOn, html: '<b>Todos los puntos QR</b><br><span class="muted">' + COB_DATA.qrs.length + ' puntos con radio de ' + radio + ' m</span>' });
   var lE = new Capa();
-  COB_DATA.escaneos.forEach(function (e) { lE.add(gmPunto(map, e.lat, e.lng, '#15925a', 14, e.hora + ' · ' + e.nombres, popupEsc(e), '#fff')); });
+  COB_DATA.escaneos.forEach(function (e) {
+    var okv = e.validez === 'VALIDO';
+    if (okv) lE.add(gmPunto(map, e.lat, e.lng, '#15925a', 14, e.hora + ' · ' + e.nombres, popupEsc(e), '#fff'));
+    else if (e.latDispositivo) lE.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, '#cf3b3b', 14, 'NO VÁLIDO · ' + e.hora + ' · ' + e.nombres, popupEsc(e), '#fff'));
+  });
   lE.setMap(map);
-  LEY.cob.push({ layer: lE, color: '#15925a', on: true, html: '<b>Escaneos realizados</b><br><span class="muted">' + COB_DATA.escaneos.length + ' registros del día</span>' });
+  LEY.cob.push({ layer: lE, color: '#15925a', on: true, html: '<b>Escaneos del día</b><br><span class="muted">' + COB_DATA.escaneos.filter(function (e) { return e.validez === 'VALIDO'; }).length + ' válidos (verde) · ' + COB_DATA.escaneos.filter(function (e) { return e.validez !== 'VALIDO'; }).length + ' no válidos (rojo, ubicación real)</span>' });
   renderLeyenda('cob', '#cLeyenda');
   gmAjustar(map, bounds, 18);
 }
@@ -304,6 +341,7 @@ function formQR(id) {
     '<div class="form-grid">' +
     '<div><label>N° de orden</label><input type="number" min="1" id="fqNum" value="' + q.numero + '"></div>' +
     '<div><label>Hora programada (opcional)</label><input type="time" id="fqHora" value="' + esc(q.hora) + '"></div>' +
+    '<div><label>Radio de geocerca (m)</label><input type="number" min="10" max="500" id="fqRadio" value="' + esc(q.radio || '') + '" placeholder="' + (CFG.geocerca || 50) + ' (por defecto)"></div>' +
     '<div class="full"><label>Nombre del lugar</label><input id="fqNom" value="' + esc(q.nombre) + '" placeholder="Ej: Parque Central"></div>' +
     '<div class="full"><label>Descripción / referencia</label><input id="fqDesc" value="' + esc(q.descripcion) + '"></div>' +
     (esSuper() ? '<div class="full"><label>Distrito / Servicio</label><select id="fqDist">' + opcionesDistrito(q.distritoId) + '</select></div>' : '') +
@@ -354,7 +392,7 @@ function miUbicacionQR(btn) {
 }
 async function guardarQR(id) {
   await run($('#fqBtn'), async function () {
-    await apiT('qrGuardar', { id: id, numero: val('#fqNum'), nombre: val('#fqNom'), descripcion: val('#fqDesc'), lat: val('#fqLat'), lng: val('#fqLng'), hora: val('#fqHora'), distritoId: esSuper() ? val('#fqDist') : USER.distritoId });
+    await apiT('qrGuardar', { id: id, numero: val('#fqNum'), nombre: val('#fqNom'), descripcion: val('#fqDesc'), lat: val('#fqLat'), lng: val('#fqLng'), hora: val('#fqHora'), radio: val('#fqRadio'), distritoId: esSuper() ? val('#fqDist') : USER.distritoId });
     cerrarModal(); toast('QR guardado.', 'ok'); await cargarQRs();
   });
 }
@@ -417,41 +455,44 @@ function imprimirQRs(ids) {
 /* ---------------- MALLA OPERATIVA ---------------- */
 async function cargarMallas(btn) {
   await run(btn, async function () {
-    MALLAS = await apiT('mallasListar', { desde: val('#maDesde'), hasta: val('#maHasta'), distritoId: val('#maDist') });
-    $('#maTabla').innerHTML = tabla(['Fecha', 'Malla', 'Distrito', 'Ruta programada', 'Asignados', 'Cumplimiento', 'Acciones'], MALLAS.map(function (m) {
-      return ['<b>' + esc(m.fecha) + '</b>', '<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span> <span class="small muted">±' + m.tolerancia + ' min</span>', esc(m.distritoNombre),
-        '<span class="small">' + esc(m.resumen) + '</span>', '<span class="small">' + esc(m.asignados.join(', ')) + '</span>',
-        '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>',
-        '<div class="acciones"><button class="btn btn-sm" onclick="verCumplimiento(\'' + m.id + '\')">📈 Cumplimiento</button><button class="btn btn-sm" onclick="formMalla(\'' + m.id + '\')">✏️</button>' +
-        '<button class="btn btn-sm" title="Duplicar a otra fecha" onclick="duplicarMalla(\'' + m.id + '\')">⧉</button><button class="btn btn-sm" title="Reenviar correo" onclick="reenviarMalla(\'' + m.id + '\')">✉️</button>' +
+    MALLAS = await apiT('mallasListar', { desde: val('#maDesde'), hasta: val('#maHasta'), distritoId: val('#maDist'), dia: hoy() });
+    $('#maTabla').innerHTML = tabla(['Vigencia', 'Malla', 'Horario', 'Ruta programada', 'Personal', 'Cumplimiento hoy', 'Acciones'], MALLAS.map(function (m) {
+      var cumpl = m.activaDia ? '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>'
+        : '<span class="small muted">' + (m.fecha > hoy() ? 'Inicia ' + esc(m.vigencia.split(' – ')[0]) : 'Finalizada') + '</span>';
+      return ['<b>' + esc(m.vigencia) + '</b>', '<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span> <span class="small muted">±' + m.tolerancia + ' min</span>' + (m.exigirFoto !== 'NO' ? ' <span class="badge b-warn">📷 foto</span>' : '') + '<div class="small muted">' + esc(m.distritoNombre) + '</div>',
+        '<b>' + esc(m.horario) + '</b>', '<span class="small">' + esc(m.resumen) + '</span>',
+        '<button class="btn btn-sm" onclick="personalMalla(\'' + m.id + '\')">👥 ' + m.nAsignados + '</button>', cumpl,
+        '<div class="acciones"><button class="btn btn-sm" onclick="verCumplimiento(\'' + m.id + '\')">📈</button><button class="btn btn-sm" title="Descargar PDF" onclick="pdfMalla(\'' + m.id + '\', this)">📄 PDF</button><button class="btn btn-sm" title="Editar" onclick="formMalla(\'' + m.id + '\')">✏️</button>' +
+        '<button class="btn btn-sm" title="Copiar a otras fechas" onclick="duplicarMalla(\'' + m.id + '\')">⧉</button>' +
         '<button class="btn btn-sm btn-danger" onclick="eliminarMalla(\'' + m.id + '\')">🗑</button></div>'];
-    }), 'No hay mallas en el rango de fechas.');
+    }), 'No hay mallas vigentes en el rango de fechas.');
   });
 }
 
 async function formMalla(id) {
-  var base = { malla: { nombre: '', fecha: val('#maDesde') || hoy(), distritoId: val('#maDist') || distDefecto(), modo: 'INDIVIDUAL', tolerancia: CFG.tolerancia, observacion: '' }, puntos: [], asignados: [] };
+  var d0 = val('#maDesde') || hoy();
+  var base = { malla: { nombre: '', fecha: d0, fechaHasta: d0, distritoId: val('#maDist') || distDefecto(), modo: 'INDIVIDUAL', tolerancia: CFG.tolerancia, observacion: '', exigirFoto: CFG.fotoObligatoria === false ? 'NO' : 'SI' }, puntos: [], asignados: [] };
   if (id) { try { base = await apiT('mallaObtener', id); } catch (e) { toast(e.message, 'err'); return; } }
   var m = base.malla;
-  MF = { id: id || '', puntos: base.puntos.map(function (p) { return { qrId: p.qrId, hora: p.hora }; }), asignados: {}, qrs: [], pols: [], map: null };
-  base.asignados.forEach(function (a) { MF.asignados[a.id] = true; });
+  MF = { id: id || '', puntos: base.puntos.map(function (p) { return { id: p.id, qrId: p.qrId, hora: p.hora }; }), qrs: [], map: null };
   modal(id ? 'Editar malla operativa' : 'Nueva malla operativa',
     '<div class="form-grid">' +
     '<div class="full"><label>Nombre de la malla / red</label><input id="mfNom" value="' + esc(m.nombre) + '" placeholder="Ej: PATRULLA 1 - MAÑANA"></div>' +
-    '<div><label>Fecha</label><input type="date" id="mfFecha" value="' + esc(m.fecha) + '"></div>' +
+    '<div><label>Vigente desde</label><input type="date" id="mfFecha" value="' + esc(m.fecha) + '" onchange="if($(\'#mfHasta\').value<this.value)$(\'#mfHasta\').value=this.value"></div>' +
+    '<div><label>Vigente hasta</label><input type="date" id="mfHasta" value="' + esc(m.fechaHasta || m.fecha) + '"></div>' +
     (esSuper() ? '<div><label>Distrito / Servicio</label><select id="mfDist" onchange="cargarMFDistrito(this.value)">' + opcionesDistrito(m.distritoId) + '</select></div>' : '') +
     '<div><label>Modalidad</label><select id="mfModo"><option value="INDIVIDUAL"' + (m.modo === 'INDIVIDUAL' ? ' selected' : '') + '>Individual (cada uno escanea)</option><option value="GRUPAL"' + (m.modo === 'GRUPAL' ? ' selected' : '') + '>Grupal (basta uno del grupo)</option></select></div>' +
     '<div><label>Tolerancia (± min)</label><input type="number" min="0" id="mfTol" value="' + esc(m.tolerancia) + '"></div>' +
+    '<div style="display:flex;align-items:flex-end"><label style="display:flex;gap:8px;align-items:center;color:var(--texto);font-size:14px;margin:0 0 10px"><input type="checkbox" id="mfFoto"' + (m.exigirFoto !== 'NO' ? ' checked' : '') + '> 📷 Exigir foto de evidencia (reto al azar)</label></div>' +
     '<div class="full"><label>Observación</label><input id="mfObs" value="' + esc(m.observacion) + '"></div>' +
     '</div>' +
-    '<div class="form-grid mt" style="grid-template-columns:1fr 1.4fr">' +
-    '<div><h3>1. Servidores asignados</h3><input id="mfBusPol" placeholder="Buscar..." oninput="renderMFPols()" class="mb"><div class="row mb"><button class="btn btn-sm" onclick="selTodosMF(true)">Todos</button><button class="btn btn-sm" onclick="selTodosMF(false)">Ninguno</button><span class="small muted" id="mfNSel"></span></div><div class="chk-list" id="mfPols">Cargando...</div></div>' +
-    '<div><h3>2. Puntos QR en orden de escaneo</h3>' +
+    '<div class="mt"><h3>Puntos QR en orden de escaneo</h3>' +
     '<div class="row mb"><select id="mfQr" class="grow" style="width:auto"></select><input type="time" id="mfHoraAdd" style="width:120px"><button class="btn btn-sm btn-primary" onclick="agregarPuntoMF()">+ Agregar</button></div>' +
     '<div class="row mb"><button class="btn btn-sm" onclick="agregarTodosMF()">Agregar todos los QR en orden</button><button class="btn btn-sm" onclick="MF.puntos=[];renderMFPuntos()">Vaciar</button></div>' +
-    '<div class="pt-list" id="mfPuntos"></div></div></div>' +
+    '<div class="pt-list" id="mfPuntos"></div></div>' +
     '<div class="mt"><div id="mfMap" class="map map-sm"></div></div>' +
-    '<div class="modal-foot"><label style="margin:0 auto 0 0;display:flex;gap:6px;align-items:center;color:var(--texto)"><input type="checkbox" id="mfMail" checked> Enviar la red por correo a los asignados</label>' +
+    '<p class="small muted mt">👥 El personal se asigna desde la pantalla <b>Usuarios</b> (o con el botón 👥 de la malla).</p>' +
+    '<div class="modal-foot">' +
     '<button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="mfBtn" onclick="guardarMalla()">Guardar malla</button></div>', true);
   setTimeout(async function () {
     if (!document.getElementById('mfMap')) return;
@@ -461,26 +502,15 @@ async function formMalla(id) {
 }
 async function cargarMFDistrito(dId) {
   try {
-    var r = await Promise.all([apiT('qrsListar', { distritoId: dId }), apiT('usuariosListar', { distritoId: dId, rol: 'POLICIA', estado: 'ACTIVO' })]);
-    MF.qrs = r[0]; MF.pols = r[1];
+    MF.qrs = await apiT('qrsListar', { distritoId: dId });
     var ids = MF.qrs.map(function (q) { return q.id; });
     MF.puntos = MF.puntos.filter(function (p) { return ids.indexOf(p.qrId) > -1; });
     $('#mfQr').innerHTML = MF.qrs.map(function (q) { return '<option value="' + q.id + '">QR ' + q.numero + ' · ' + esc(q.nombre) + (q.hora ? ' (' + q.hora + ')' : '') + '</option>'; }).join('') || '<option value="">No hay QR en este distrito</option>';
     $('#mfQr').onchange = function () { var q = MF.qrs.find(function (x) { return x.id === val('#mfQr'); }); $('#mfHoraAdd').value = q && q.hora ? q.hora : ''; };
     $('#mfQr').onchange();
-    renderMFPols(); renderMFPuntos();
+    renderMFPuntos();
   } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }
-function renderMFPols() {
-  var b = val('#mfBusPol').toLowerCase();
-  var l = MF.pols.filter(function (u) { return !b || (u.nombres + ' ' + u.cedula + ' ' + u.grado).toLowerCase().indexOf(b) > -1; });
-  $('#mfPols').innerHTML = l.map(function (u) {
-    return '<label><input type="checkbox" ' + (MF.asignados[u.id] ? 'checked' : '') + ' onchange="MF.asignados[\'' + u.id + '\']=this.checked;contarMF()"> <span><b>' + esc(u.grado) + '</b> ' + esc(u.nombres) + '<br><span class="small muted">' + esc(u.cedula) + '</span></span></label>';
-  }).join('') || '<div class="muted small">No hay servidores activos en este distrito.</div>';
-  contarMF();
-}
-function contarMF() { $('#mfNSel').textContent = Object.keys(MF.asignados).filter(function (k) { return MF.asignados[k]; }).length + ' seleccionados'; }
-function selTodosMF(on) { MF.pols.forEach(function (u) { MF.asignados[u.id] = on; }); renderMFPols(); }
 function agregarPuntoMF() { var id = val('#mfQr'); if (!id) return; MF.puntos.push({ qrId: id, hora: val('#mfHoraAdd') }); renderMFPuntos(); }
 function agregarTodosMF() { MF.qrs.slice().sort(function (a, b) { return a.numero - b.numero; }).forEach(function (q) { MF.puntos.push({ qrId: q.id, hora: q.hora || '' }); }); renderMFPuntos(); }
 function moverPuntoMF(i, d) { var j = i + d; if (j < 0 || j >= MF.puntos.length) return; var t = MF.puntos[i]; MF.puntos[i] = MF.puntos[j]; MF.puntos[j] = t; renderMFPuntos(); }
@@ -510,72 +540,278 @@ function renderMFPuntos() {
   }
 }
 async function guardarMalla() {
-  var asig = Object.keys(MF.asignados).filter(function (k) { return MF.asignados[k]; });
   await run($('#mfBtn'), async function () {
     var r = await apiT('mallaGuardar', {
-      id: MF.id, nombre: val('#mfNom'), fecha: val('#mfFecha'), distritoId: esSuper() ? val('#mfDist') : USER.distritoId,
-      modo: val('#mfModo'), tolerancia: val('#mfTol'), observacion: val('#mfObs'), puntos: MF.puntos, asignados: asig, enviarCorreo: $('#mfMail').checked
+      id: MF.id, nombre: val('#mfNom'), fecha: val('#mfFecha'), fechaHasta: val('#mfHasta'), distritoId: esSuper() ? val('#mfDist') : USER.distritoId,
+      modo: val('#mfModo'), tolerancia: val('#mfTol'), observacion: val('#mfObs'), exigirFoto: $('#mfFoto').checked,
+      puntos: MF.puntos
     });
     cerrarModal();
-    var msg = 'Malla guardada.';
-    if (r.correo) msg += ' Correos enviados: ' + r.correo.enviados + (r.correo.fallidos.length ? ' · Fallidos: ' + r.correo.fallidos.join(', ') : '');
-    toast(msg, r.correo && r.correo.fallidos.length ? 'err' : 'ok', 7000);
+    toast(MF.id ? 'Malla actualizada.' : 'Malla creada. Ahora asigne el personal desde la pantalla Usuarios.', 'ok', 7000);
     cargarMallas();
   });
 }
-async function verCumplimiento(id) {
+function celdaCumpl(s, grupo) {
+  if (!s) return '<span class="badge b-gray">Pendiente</span>';
+  if (s.validez !== 'VALIDO') return '<span class="small">' + s.hora + '</span> ' + badgeValidez(s.validez) + (s.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(s.motivo) + '</div>' : '') + (grupo ? '<div class="small">' + esc(s.grado + ' ' + s.nombres) + '</div>' : '');
+  return '<b>' + s.hora + '</b> ' + badgeHora(s.estadoHora) + ' <span class="small muted">' + difTxt(s.minutosDif) + '</span>' +
+    (s.ordenCorrecto === 'NO' ? '<br><span class="badge b-bad">Fuera de orden</span>' : '') + (s.nFotos ? ' <button class="btn btn-sm" onclick="verFoto(\'' + s.id + '\',0)">📷</button>' : '') +
+    (grupo ? '<br><span class="small">' + esc(s.grado + ' ' + s.nombres) + '</span>' : '');
+}
+async function verCumplimiento(id, dia) {
   try {
-    var c = await apiT('mallaCumplimiento', id);
+    var c = await apiT('mallaCumplimiento', id, dia || '');
     var cols = ['Orden', 'Punto', 'Hora prog.'].concat(c.columnas.map(function (x) { return esc(x.nombre); }));
     var filas = c.filas.map(function (f) {
-      return ['<b>' + f.orden + '</b>', '<b>QR ' + f.qrNumero + '</b> ' + esc(f.qrNombre), esc(f.hora || 'libre')].concat(c.columnas.map(function (col) {
-        var s = f.celdas[col.id];
-        if (!s) return '<span class="badge b-gray">Pendiente</span>';
-        return '<b>' + s.hora + '</b> ' + badgeHora(s.estadoHora) + ' <span class="small muted">' + difTxt(s.minutosDif) + '</span>' +
-          (s.ordenCorrecto === 'NO' ? '<br><span class="badge b-bad">Fuera de orden</span>' : '') + (s.alerta ? '<br><span class="badge b-bad">⚠ ' + esc(s.alerta) + '</span>' : '') +
-          (col.id === 'GRUPO' ? '<br><span class="small">' + esc(s.grado + ' ' + s.nombres) + '</span>' : '');
-      }));
+      return ['<b>' + f.orden + '</b>', '<b>QR ' + f.qrNumero + '</b> ' + esc(f.qrNombre), esc(f.hora || 'libre')].concat(c.columnas.map(function (col) { return celdaCumpl(f.celdas[col.id], col.id === 'GRUPO'); }));
     });
+    var vig = c.malla.fecha === c.malla.fechaHasta ? c.malla.fecha : c.malla.fecha + ' a ' + c.malla.fechaHasta;
     modal('Cumplimiento · ' + c.malla.nombre,
-      '<div class="row mb"><span class="badge">' + esc(c.malla.fecha) + '</span><span class="badge">' + esc(c.distritoNombre) + '</span><span class="badge">' + c.malla.modo + '</span><span class="badge">±' + c.malla.tolerancia + ' min</span></div>' +
-      '<div class="stats"><div class="stat"><div class="n">' + c.pct + '%</div><div class="l">Cumplimiento</div></div><div class="stat"><div class="n">' + c.hechos + '/' + c.total + '</div><div class="l">Escaneos realizados</div></div><div class="stat"><div class="n">' + c.aTiempo + '</div><div class="l">A tiempo</div></div></div>' +
+      '<div class="row mb"><span class="badge">Vigencia ' + esc(vig) + '</span><span class="badge">' + esc(c.distritoNombre) + '</span><span class="badge">' + c.malla.modo + '</span><span class="badge">±' + c.malla.tolerancia + ' min</span>' +
+      '<span class="grow"></span><label style="margin:0">Día</label><input type="date" style="width:170px" min="' + c.malla.fecha + '" max="' + c.malla.fechaHasta + '" value="' + c.dia + '" onchange="verCumplimiento(\'' + id + '\', this.value)"></div>' +
+      '<div class="stats"><div class="stat"><div class="n">' + c.pct + '%</div><div class="l">Cumplimiento del ' + esc(c.dia) + '</div></div><div class="stat"><div class="n">' + c.hechos + '/' + c.total + '</div><div class="l">Puntos válidos</div></div><div class="stat"><div class="n">' + c.aTiempo + '</div><div class="l">A tiempo</div></div></div>' +
       tabla(cols, filas), true);
   } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }
 function duplicarMalla(id) {
-  modal('Duplicar malla a otra fecha', '<div class="field"><label>Nueva fecha</label><input type="date" id="dupF" value="' + hoy() + '"></div><label style="display:flex;gap:6px;color:var(--texto)"><input type="checkbox" id="dupM" checked> Enviar correo a los asignados</label>' +
-    '<div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="dupBtn">Duplicar</button></div>');
+  modal('Copiar malla a otras fechas', '<p class="small muted">Se crea una nueva malla con los mismos puntos, horarios y personal.</p><div class="form-grid"><div><label>Desde</label><input type="date" id="dupF" value="' + hoy() + '"></div><div><label>Hasta</label><input type="date" id="dupH" value="' + hoy() + '"></div></div>' +
+    '<p class="small muted mt">Si alguien del personal tendría cruce de horario con otra de sus mallas, el sistema lo avisará y no copiará.</p>' +
+    '<div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="dupBtn">Copiar</button></div>');
   $('#dupBtn').onclick = function () {
     run($('#dupBtn'), async function () {
-      var r = await apiT('mallaDuplicar', id, val('#dupF'), $('#dupM').checked);
-      cerrarModal(); toast('Malla duplicada.' + (r.correo ? ' Correos: ' + r.correo.enviados : ''), 'ok'); cargarMallas();
+      await apiT('mallaDuplicar', id, val('#dupF'), false, val('#dupH'));
+      cerrarModal(); toast('Malla copiada con sus puntos, horarios y personal.', 'ok'); cargarMallas();
     });
   };
 }
-async function reenviarMalla(id) {
-  if (!await confirmar('¿Reenviar la red de patrullaje por correo a todos los asignados?', 'Enviar')) return;
-  try { var r = await apiT('mallaReenviar', id); toast('Correos enviados: ' + r.enviados + (r.fallidos.length ? ' · Fallidos: ' + r.fallidos.join(', ') : ''), 'ok'); } catch (e) { toast(e.message, 'err'); }
+
+/* ---- Personal de la malla: quitar, agregar, transferir ---- */
+async function personalMalla(id) {
+  try {
+    var r = await Promise.all([apiT('mallaObtener', id), apiT('mallasDestino', id)]);
+    var o = r[0], destinos = r[1];
+    var pols = await apiT('usuariosListar', { distritoId: o.malla.distritoId, rol: 'POLICIA', estado: 'ACTIVO' });
+    var dentro = {}; o.asignados.forEach(function (a) { dentro[a.id] = 1; });
+    var optsDest = destinos.map(function (d) { return '<option value="' + d.id + '">' + esc(d.nombre) + ' · ' + esc(d.vigencia) + ' · ' + esc(d.horario) + '</option>'; }).join('');
+    modal('👥 Personal · ' + o.malla.nombre,
+      '<p class="small muted">' + o.asignados.length + ' servidores asignados. Los cambios se aplican de inmediato.</p>' +
+      tabla(['Grado y nombres', 'Cédula', 'Acciones'], o.asignados.map(function (a) {
+        return ['<b>' + esc(a.grado) + '</b> ' + esc(a.nombres), esc(a.cedula),
+          '<div class="acciones"><button class="btn btn-sm" onclick="abrirTransferir(\'' + id + '\',\'' + a.id + '\')"' + (destinos.length ? '' : ' disabled title="No hay otras mallas vigentes"') + '>⇄ Transferir</button>' +
+          '<button class="btn btn-sm btn-danger" onclick="quitarDeMalla(\'' + id + '\',\'' + a.id + '\')">Quitar</button></div>'];
+      })) +
+      '<div id="trBox" class="card mt" hidden><h3 id="trTit"></h3><label>Malla destino</label><select id="trDest">' + optsDest + '</select>' +
+
+      '<div class="modal-foot"><button class="btn" onclick="$(\'#trBox\').hidden=true">Cancelar</button><button class="btn btn-primary" id="trBtn">Transferir</button></div></div>' +
+      '<div class="card mt"><h3>Agregar servidor</h3><div class="row"><select id="addPol" class="grow" style="width:auto">' +
+      pols.filter(function (u) { return !dentro[u.id]; }).map(function (u) { return '<option value="' + u.id + '">' + esc(u.grado + ' ' + u.nombres) + ' · ' + esc(u.cedula) + '</option>'; }).join('') +
+      '</select><button class="btn btn-primary" id="addBtn" onclick="agregarAMalla(\'' + id + '\')">+ Agregar</button></div></div>', true);
+  } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+}
+function abrirTransferir(mallaId, uid) {
+  var tr = $('#trBox'); tr.hidden = false;
+  var fila = Array.prototype.find.call(document.querySelectorAll('#mBody tr'), function (r) { return r.innerHTML.indexOf("abrirTransferir('" + mallaId + "','" + uid + "')") > -1; });
+  $('#trTit').textContent = 'Transferir a ' + (fila ? fila.cells[0].textContent : '');
+  $('#trBtn').onclick = function () {
+    run($('#trBtn'), async function () {
+      var msg = await apiT('mallaTransferir', mallaId, uid, val('#trDest'), false);
+      toast(msg, 'ok', 6000); personalMalla(mallaId); cargarMallas();
+    });
+  };
+  tr.scrollIntoView({ behavior: 'smooth' });
+}
+async function quitarDeMalla(mallaId, uid) {
+  if (!await confirmar('¿Quitar a este servidor de la malla?', 'Quitar')) { personalMalla(mallaId); return; }
+  try { toast(await apiT('mallaQuitarPolicia', mallaId, uid), 'ok'); } catch (e) { if (!e.silent) toast(e.message, 'err', 8000); }
+  personalMalla(mallaId); cargarMallas();
+}
+async function agregarAMalla(mallaId) {
+  var uid = val('#addPol'); if (!uid) return;
+  await run($('#addBtn'), async function () {
+    toast(await apiT('mallaAgregarPolicia', mallaId, uid, false), 'ok', 6000);
+    personalMalla(mallaId); cargarMallas();
+  });
+}
+
+/* ---- PDF de la malla (se genera en el navegador) ---- */
+var _pdfLibs = null;
+function cargarScript(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = function () { rej(new Error('No se pudo cargar ' + src)); }; document.head.appendChild(s); }); }
+function cargarPDF() {
+  if (window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable) return Promise.resolve();
+  if (!_pdfLibs) _pdfLibs = cargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+    .then(function () { return cargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'); })
+    .catch(function (e) { _pdfLibs = null; throw e; });
+  return _pdfLibs;
+}
+function fCorta(f) { var p = String(f || '').split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : f; }
+async function pdfMalla(id, btn) {
+  await run(btn, async function () {
+    var r = await Promise.all([apiT('mallaObtener', id), cargarPDF()]);
+    var o = r[0], m = o.malla;
+    var doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4' });
+    var W = doc.internal.pageSize.getWidth(), azul = [11, 46, 107];
+    // Encabezado
+    doc.setFillColor.apply(doc, azul); doc.rect(0, 0, W, 26, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(INSTITUCION.toUpperCase() + ' · ' + APP_NOMBRE.toUpperCase(), 14, 9);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text('MALLA OPERATIVA: ' + m.nombre, 14, 18);
+    doc.setTextColor(29, 36, 51);
+    var horas = o.puntos.map(function (p) { return p.hora; }).filter(Boolean).sort();
+    var vig = m.fecha === m.fechaHasta ? fCorta(m.fecha) : 'Del ' + fCorta(m.fecha) + ' al ' + fCorta(m.fechaHasta);
+    var info = [['Distrito / Servicio', o.distritoNombre], ['Vigencia', vig], ['Horario', horas.length ? horas[0] + ' a ' + horas[horas.length - 1] : 'Libre'],
+      ['Modalidad', m.modo === 'GRUPAL' ? 'Grupal (basta que un integrante escanee cada punto)' : 'Individual (cada integrante escanea cada punto)'],
+      ['Tolerancia', '± ' + m.tolerancia + ' minutos'], ['Personal asignado', o.asignados.length + (o.asignados.length === 1 ? ' servidor' : ' servidores')]];
+    if (m.observacion) info.push(['Observación', m.observacion]);
+    doc.autoTable({ startY: 31, body: info, theme: 'plain', styles: { fontSize: 10, cellPadding: 1.4 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42, textColor: [107, 118, 144] } }, margin: { left: 14, right: 14 } });
+    // Puntos
+    var y = doc.lastAutoTable.finalY + 6;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor.apply(doc, azul); doc.text('PUNTOS Y HORARIOS (en orden de escaneo)', 14, y);
+    doc.autoTable({
+      startY: y + 3, head: [['Orden', 'QR', 'Lugar', 'Hora', 'Ubicación']],
+      body: o.puntos.map(function (p) { return [p.orden, 'QR ' + p.qrNumero, p.qrNombre + (p.descripcion ? '\n' + p.descripcion : ''), p.hora || 'Libre', 'Abrir mapa']; }),
+      headStyles: { fillColor: azul, fontSize: 10 }, styles: { fontSize: 10, cellPadding: 2.2, valign: 'middle' },
+      columnStyles: { 0: { halign: 'center', cellWidth: 16, fontStyle: 'bold' }, 1: { cellWidth: 18, fontStyle: 'bold' }, 3: { halign: 'center', cellWidth: 20, fontStyle: 'bold' }, 4: { cellWidth: 26, textColor: [26, 79, 163] } },
+      margin: { left: 14, right: 14 },
+      didDrawCell: function (d) {
+        if (d.section === 'body' && d.column.index === 4) { var p = o.puntos[d.row.index]; doc.link(d.cell.x, d.cell.y, d.cell.width, d.cell.height, { url: 'https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng }); }
+      }
+    });
+    y = doc.lastAutoTable.finalY + 5;
+    var ruta = o.puntos.filter(function (p) { return p.lat; }).map(function (p) { return p.lat + ',' + p.lng; });
+    if (ruta.length) { doc.setFontSize(10); doc.setTextColor(26, 79, 163); doc.textWithLink('>> Ver la ruta completa en Google Maps', 14, y, { url: 'https://www.google.com/maps/dir/' + ruta.join('/') }); y += 4; }
+    // Personal
+    y += 5; doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor.apply(doc, azul); doc.text('PERSONAL ASIGNADO', 14, y);
+    doc.autoTable({
+      startY: y + 3, head: [['N°', 'Grado', 'Apellidos y nombres', 'Cédula', 'Teléfono']],
+      body: o.asignados.map(function (a, i) { return [i + 1, a.grado || '', a.nombres, a.cedula, a.telefono || '']; }),
+      headStyles: { fillColor: azul, fontSize: 10 }, styles: { fontSize: 10, cellPadding: 2 }, columnStyles: { 0: { halign: 'center', cellWidth: 12 } }, margin: { left: 14, right: 14 }
+    });
+    // Instrucciones
+    y = doc.lastAutoTable.finalY + 8;
+    var inst = ['1. Escanee cada código QR con la app de patrullaje, en el orden y la hora indicados.',
+      '2. Presione "Activar GPS": debe estar físicamente junto al QR (máx. ' + (CFG.geocerca || 50) + ' m) o el punto quedará NO VÁLIDO.',
+      m.exigirFoto !== 'NO' ? '3. Tome la foto de evidencia que le pida la app (en vivo, dirección elegida al azar).' : '',
+      'App de patrullaje: ' + (APP_URL || '')].filter(Boolean);
+    if (y > 260) { doc.addPage(); y = 20; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(29, 36, 51); doc.text('INSTRUCCIONES', 14, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    inst.forEach(function (t, i) { doc.text(doc.splitTextToSize(t, W - 28), 14, y + 6 + i * 6); });
+    // Pie de página
+    var n = doc.internal.getNumberOfPages();
+    for (var i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(107, 118, 144);
+      doc.text('Generado el ' + new Date().toLocaleString('es-EC') + ' por ' + USER.nombres, 14, 290);
+      doc.text('Página ' + i + ' de ' + n, W - 14, 290, { align: 'right' });
+    }
+    doc.save('Malla_' + m.nombre.replace(/[^\w]+/g, '_') + '_' + m.fecha + (m.fechaHasta !== m.fecha ? '_al_' + m.fechaHasta : '') + '.pdf');
+  });
 }
 async function eliminarMalla(id) {
   if (!await confirmar('¿Eliminar esta malla operativa?', 'Eliminar')) return;
   try { toast(await apiT('mallaEliminar', id), 'ok'); cargarMallas(); } catch (e) { toast(e.message, 'err'); }
 }
 
-/* ---------------- USUARIOS ---------------- */
+/* ---------------- USUARIOS + CENTRO DE ASIGNACIÓN ---------------- */
+var USEL = {};
 async function cargarUsuarios() {
-  try { USUARIOS = await apiT('usuariosListar', { distritoId: val('#uDist'), rol: val('#uRol'), estado: val('#uEstado') }); renderUsuarios(); } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+  try { USUARIOS = await apiT('usuariosListar', { distritoId: val('#uDist'), rol: val('#uRol'), estado: val('#uEstado') }); USEL = {}; renderUsuarios(); } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+}
+function chipsMallas(u) {
+  return (u.mallas || []).map(function (m) { return '<span class="mchip" title="' + esc(m.vigencia + ' · ' + m.horario) + '"><b>' + esc(m.nombre) + '</b> · ' + esc(m.horario) + '</span>'; }).join('') || '<span class="small muted">Sin malla</span>';
+}
+function filtrarUsuarios() {
+  var b = val('#uBuscar').toLowerCase(), bc = normCedula(b), fa = val('#uAsig');
+  return USUARIOS.filter(function (u) {
+    var n = (u.mallas || []).length;
+    if (fa !== '' && (u.rol !== 'POLICIA' || (fa === '0' && n) || (fa === '1' && n !== 1) || (fa === '2' && n < 2))) return false;
+    return !b || (u.nombres + ' ' + u.email).toLowerCase().indexOf(b) > -1 || (bc && u.cedula.indexOf(bc) > -1) || u.cedula.indexOf(b) > -1;
+  });
 }
 function renderUsuarios() {
-  var b = val('#uBuscar').toLowerCase(), bc = normCedula(b);
-  var l = USUARIOS.filter(function (u) { return !b || (u.nombres + ' ' + u.email).toLowerCase().indexOf(b) > -1 || (bc && u.cedula.indexOf(bc) > -1) || u.cedula.indexOf(b) > -1; });
-  $('#uTabla').innerHTML = tabla(['Cédula', 'Grado y nombres', 'Correo', 'Rol', 'Distrito', 'Estado', 'Último acceso', 'Acciones'], l.map(function (u) {
-    var self = u.id === USER.id;
-    return [esc(u.cedula), '<b>' + esc(u.grado) + '</b> ' + esc(u.nombres), esc(u.email) + (u.telefono ? '<br><span class="small muted">' + esc(u.telefono) + '</span>' : ''), '<span class="badge">' + u.rol + '</span>', esc(u.distritoNombre || '—'), badgeEstado(u.estado), '<span class="small">' + esc(u.ultimoAcceso || '—') + '</span>',
-      '<div class="acciones">' + (u.estado === 'PENDIENTE' ? '<button class="btn btn-sm btn-ok" onclick="estadoUsr(\'' + u.id + '\',\'ACTIVO\')">✔ Aprobar</button>' : '') +
-      '<button class="btn btn-sm" onclick="formUsuario(\'' + u.id + '\')">✏️</button>' +
-      (self ? '' : '<button class="btn btn-sm" title="Enviar nueva clave" onclick="resetUsr(\'' + u.id + '\')">🔑</button>' +
-        (u.estado === 'ACTIVO' ? '<button class="btn btn-sm btn-danger" onclick="estadoUsr(\'' + u.id + '\',\'INACTIVO\')">Desactivar</button>' : u.estado === 'INACTIVO' ? '<button class="btn btn-sm" onclick="estadoUsr(\'' + u.id + '\',\'ACTIVO\')">Activar</button>' : '')) + '</div>'];
-  }), 'No hay usuarios.');
+  var l = filtrarUsuarios();
+  var head = ['<input type="checkbox" title="Seleccionar todos" onchange="selTodosU(this.checked)">', 'Cédula', 'Grado y nombres', 'Rol / Estado', 'Mallas asignadas (vigentes)', 'Acciones'];
+  var filas = l.map(function (u) {
+    var self = u.id === USER.id, pol = u.rol === 'POLICIA', n = (u.mallas || []).length;
+    var asig = pol && u.estado === 'ACTIVO' ? '<button class="btn btn-sm btn-primary" onclick="modalAsignar([\'' + u.id + '\'])">📅 Asignar</button>' +
+      (n ? '<button class="btn btn-sm" onclick="modalMover(\'' + u.id + '\')">⇄ Mover</button><button class="btn btn-sm" onclick="limpiarUsuarios([\'' + u.id + '\'])">🧹 Limpiar</button>' : '') : '';
+    return {
+      cls: pol ? (n >= 2 ? 'a2' : n === 1 ? 'a1' : 'a0') : '',
+      celdas: [pol && u.estado === 'ACTIVO' ? '<input type="checkbox" class="uchk" value="' + u.id + '"' + (USEL[u.id] ? ' checked' : '') + ' onchange="USEL[this.value]=this.checked;contarU()">' : '',
+        esc(u.cedula), '<b>' + esc(u.grado) + '</b> ' + esc(u.nombres) + (u.telefono ? '<div class="small muted">' + esc(u.telefono) + '</div>' : '') + (esSuper() ? '<div class="small muted">' + esc(u.distritoNombre || '—') + '</div>' : ''),
+        '<span class="badge">' + u.rol + '</span> ' + badgeEstado(u.estado) + '<div class="small muted">Últ. acceso: ' + esc(u.ultimoAcceso || '—') + '</div>',
+        pol ? chipsMallas(u) : '<span class="small muted">—</span>',
+        '<div class="acciones">' + (u.estado === 'PENDIENTE' ? '<button class="btn btn-sm btn-ok" onclick="estadoUsr(\'' + u.id + '\',\'ACTIVO\')">✔ Aprobar</button>' : '') + asig +
+        '<button class="btn btn-sm" title="Editar" onclick="formUsuario(\'' + u.id + '\')">✏️</button>' +
+        (self ? '' : '<button class="btn btn-sm" title="Restablecer clave (= cédula)" onclick="resetUsr(\'' + u.id + '\')">🔑</button>' +
+          (u.estado === 'ACTIVO' ? '<button class="btn btn-sm btn-danger" title="Desactivar usuario" onclick="estadoUsr(\'' + u.id + '\',\'INACTIVO\')">⛔</button>' : u.estado === 'INACTIVO' ? '<button class="btn btn-sm" onclick="estadoUsr(\'' + u.id + '\',\'ACTIVO\')">Activar</button>' : '')) + '</div>']
+    };
+  });
+  if (!filas.length) { $('#uTabla').innerHTML = '<div class="card muted center">No hay usuarios.</div>'; contarU(); return; }
+  $('#uTabla').innerHTML = '<div class="tbl-wrap"><table class="tbl"><thead><tr>' + head.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    filas.map(function (f) { return '<tr class="' + f.cls + '">' + f.celdas.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+  contarU();
+}
+function selTodosU(on) { $$('.uchk').forEach(function (c) { c.checked = on; USEL[c.value] = on; }); contarU(); }
+function seleccionU() { return Object.keys(USEL).filter(function (k) { return USEL[k]; }); }
+function contarU() { var n = seleccionU().length; $('#uSelN').textContent = n + (n === 1 ? ' seleccionado' : ' seleccionados'); }
+function asignarSeleccionados() { var ids = seleccionU(); if (!ids.length) { toast('Marque los usuarios en la primera columna.', 'err'); return; } modalAsignar(ids); }
+function limpiarSeleccionados() { var ids = seleccionU(); if (!ids.length) { toast('Marque los usuarios en la primera columna.', 'err'); return; } limpiarUsuarios(ids); }
+function nombreU(id) { var u = USUARIOS.find(function (x) { return x.id === id; }); return u ? (u.grado + ' ' + u.nombres).trim() : id; }
+
+/** Lista de mallas vigentes/futuras con casillas */
+function listaMallasHTML(mallas, marcadas, bloqueadas) {
+  if (!mallas.length) return '<div class="card muted center">No hay mallas vigentes. Créelas primero en "Malla operativa".</div>';
+  return '<div class="chk-list" style="max-height:340px">' + mallas.map(function (m) {
+    var bl = bloqueadas && bloqueadas[m.id];
+    return '<label style="padding:8px 6px;border-bottom:1px solid var(--borde)"><input type="checkbox" class="mchk" value="' + m.id + '"' + ((marcadas && marcadas[m.id]) || bl ? ' checked' : '') + (bl ? ' disabled' : '') + '>' +
+      '<span style="flex:1"><b>' + esc(m.nombre) + '</b>' + (bl ? ' <span class="badge b-ok">ya asignado</span>' : '') + '<br><span class="small muted">📅 ' + esc(m.vigencia) + ' · 🕒 ' + esc(m.horario) + ' · 👥 ' + m.nAsignados + '</span></span></label>';
+  }).join('') + '</div>';
+}
+async function mallasDelDistrito(uids) {
+  var u = USUARIOS.find(function (x) { return x.id === uids[0]; });
+  return apiT('mallasActivas', esSuper() ? (u ? u.distritoId : '') : USER.distritoId);
+}
+async function modalAsignar(uids) {
+  try {
+    var mallas = await mallasDelDistrito(uids);
+    var ya = {};
+    if (uids.length === 1) { var u = USUARIOS.find(function (x) { return x.id === uids[0]; }); (u.mallas || []).forEach(function (m) { ya[m.id] = 1; }); }
+    modal('📅 Asignar a malla(s)',
+      '<p><b>' + (uids.length === 1 ? esc(nombreU(uids[0])) : uids.length + ' usuarios seleccionados') + '</b></p>' +
+      '<p class="small muted">Marque una o varias mallas. El sistema no permite asignar mallas que se crucen en fechas y horarios.</p>' + listaMallasHTML(mallas, {}, ya) +
+      '<div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="asgBtn">Asignar</button></div>', true);
+    $('#asgBtn').onclick = function () {
+      var mids = $$('.mchk').filter(function (c) { return c.checked && !c.disabled; }).map(function (c) { return c.value; });
+      if (!mids.length) { toast('Marque al menos una malla.', 'err'); return; }
+      run($('#asgBtn'), async function () { var msg = await apiT('usuariosAsignar', uids, mids); cerrarModal(); toast(msg, 'ok', 6000); cargarUsuarios(); });
+    };
+  } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+}
+async function modalMover(uid) {
+  try {
+    var u = USUARIOS.find(function (x) { return x.id === uid; });
+    var mallas = await mallasDelDistrito([uid]);
+    var opts = u.mallas.map(function (m) { return '<option value="' + m.id + '">' + esc(m.nombre) + ' · ' + esc(m.vigencia) + ' · ' + esc(m.horario) + '</option>'; }).join('');
+    modal('⇄ Mover a otra(s) malla(s)',
+      '<p><b>' + esc(nombreU(uid)) + '</b></p><label>Sacar de la malla</label><select id="movOrig" onchange="renderDestinosMover(\'' + uid + '\')">' + opts + '</select>' +
+      '<label class="mt" style="margin-top:14px">Mover a (una o más)</label><div id="movDest"></div>' +
+      '<div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="movBtn">Mover</button></div>', true);
+    MF = { movMallas: mallas };
+    renderDestinosMover(uid);
+    $('#movBtn').onclick = function () {
+      var mids = $$('.mchk').filter(function (c) { return c.checked && !c.disabled; }).map(function (c) { return c.value; });
+      if (!mids.length) { toast('Marque al menos una malla destino.', 'err'); return; }
+      run($('#movBtn'), async function () { var msg = await apiT('usuarioMover', uid, val('#movOrig'), mids); cerrarModal(); toast(msg, 'ok', 6000); cargarUsuarios(); });
+    };
+  } catch (e) { if (!e.silent) toast(e.message, 'err'); }
+}
+function renderDestinosMover(uid) {
+  var u = USUARIOS.find(function (x) { return x.id === uid; }), orig = val('#movOrig'), ya = {};
+  (u.mallas || []).forEach(function (m) { if (m.id !== orig) ya[m.id] = 1; });
+  $('#movDest').innerHTML = listaMallasHTML(MF.movMallas.filter(function (m) { return m.id !== orig; }), {}, ya);
+}
+async function limpiarUsuarios(uids) {
+  if (!await confirmar('¿Retirar a ' + (uids.length === 1 ? nombreU(uids[0]) : uids.length + ' usuarios') + ' de TODAS sus mallas vigentes? Quedarán sin asignación.', 'Limpiar')) return;
+  try { toast(await apiT('usuariosLimpiar', uids), 'ok', 6000); cargarUsuarios(); } catch (e) { if (!e.silent) toast(e.message, 'err', 8000); }
 }
 function formUsuario(id) {
   var u = id ? USUARIOS.find(function (x) { return x.id === id; }) : { cedula: '', nombres: '', grado: '', email: '', telefono: '', rol: 'POLICIA', distritoId: val('#uDist') || distDefecto() };
@@ -585,11 +821,11 @@ function formUsuario(id) {
     '<div><label>Cédula (9 o 10 dígitos)</label><input id="fuCed" value="' + esc(u.cedula) + '" inputmode="numeric" maxlength="10" onblur="this.value=normCedula(this.value)"></div>' +
     '<div><label>Grado</label><select id="fuGrado"><option value="">—</option>' + GRADOS.map(function (g) { return '<option' + (g === u.grado ? ' selected' : '') + '>' + g + '</option>'; }).join('') + '</select></div>' +
     '<div class="full"><label>Apellidos y nombres</label><input id="fuNom" value="' + esc(u.nombres) + '"></div>' +
-    '<div><label>Correo electrónico</label><input id="fuMail" type="email" value="' + esc(u.email) + '"></div>' +
+    '<div><label>Correo electrónico (opcional)</label><input id="fuMail" type="email" value="' + esc(u.email) + '"></div>' +
     '<div><label>Teléfono</label><input id="fuTel" value="' + esc(u.telefono) + '"></div>' +
     '<div' + (esSuper() ? '' : ' hidden') + '><label>Rol</label><select id="fuRol">' + roles.map(function (r) { return '<option' + (r === u.rol ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></div>' +
     '<div' + (esSuper() ? '' : ' hidden') + '><label>Distrito / Servicio</label><select id="fuDist"><option value="">— (solo Super Admin) —</option>' + opcionesDistrito(u.distritoId) + '</select></div>' +
-    '</div>' + (id ? '' : '<p class="small muted">Se enviará una clave temporal al correo. El usuario deberá cambiarla al ingresar.</p>') +
+    '</div>' + (id ? '' : '<p class="small muted">🔑 Usuario y clave inicial: su <b>número de cédula</b> (con o sin el 0). Deberá cambiarla en el primer ingreso. Luego asígnelo a sus mallas desde esta pantalla.</p>') +
     '<div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="fuBtn" onclick="guardarUsuario(\'' + (id || '') + '\')">Guardar</button></div>');
 }
 async function guardarUsuario(id) {
@@ -602,7 +838,7 @@ async function estadoUsr(id, estado) {
   try { toast(await apiT('usuarioEstado', id, estado), 'ok', 8000); cargarUsuarios(); } catch (e) { toast(e.message, 'err'); }
 }
 async function resetUsr(id) {
-  if (!await confirmar('¿Generar y enviar una nueva clave temporal a este usuario?', 'Enviar')) return;
+  if (!await confirmar('¿Restablecer la clave? Quedará como su número de cédula y deberá cambiarla al ingresar.', 'Restablecer')) return;
   try { toast(await apiT('usuarioResetClave', id), 'ok', 9000); } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -651,7 +887,7 @@ async function consultarReporte(btn) {
 }
 function descargarCSV() {
   if (!REPORTE.length) { toast('Primero realice una consulta.', 'err'); return; }
-  var cols = ['fechaHora', 'qrNumero', 'qrNombre', 'lat', 'lng', 'cedula', 'grado', 'nombres', 'mallaNombre', 'ordenEsperado', 'horaEsperada', 'minutosDif', 'estadoHora', 'ordenCorrecto', 'distanciaM', 'alerta'];
+  var cols = ['fechaHora', 'qrNumero', 'qrNombre', 'lat', 'lng', 'cedula', 'grado', 'nombres', 'validez', 'motivo', 'latDispositivo', 'lngDispositivo', 'distanciaM', 'precisionM', 'retos', 'mallaNombre', 'ordenEsperado', 'horaEsperada', 'minutosDif', 'estadoHora', 'ordenCorrecto', 'alerta'];
   var q = function (v) { v = String(v == null ? '' : v); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
   var csv = '\ufeff' + cols.join(';') + '\n' + REPORTE.map(function (r) { return cols.map(function (c) { return q(c === 'cedula' ? '\'' + r[c] : r[c]); }).join(';'); }).join('\n');
   var a = document.createElement('a');
