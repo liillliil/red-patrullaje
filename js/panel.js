@@ -167,7 +167,7 @@ async function cargarDash() {
     $('#dStats').innerHTML = st.map(function (s) { return '<div class="stat"><div class="n">' + s[1] + '</div><div class="l">' + s[0] + '</div></div>'; }).join('');
     $('#dMallas').innerHTML = tabla(['Malla', 'Distrito', 'Horario', 'Ruta', 'Asignados', 'Cumplimiento', ''], d.mallasHoy.map(function (m) {
       return ['<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span>', esc(m.distritoNombre), '<b>' + esc(m.horario) + '</b>', '<span class="small">' + esc(m.resumen) + '</span>', '<span class="small">' + m.nAsignados + ' servidores</span>',
-        '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>',
+        '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>' + (m.noCumplidos ? '<div class="nocump nocump-sm">❌ ' + m.noCumplidos + ' NO CUMPLIDO' + (m.noCumplidos > 1 ? 'S' : '') + '</div>' : ''),
         '<button class="btn btn-sm" onclick="verCumplimiento(\'' + m.id + '\')">Detalle</button>'];
     }), 'No hay mallas programadas para hoy.');
     $('#dUlt').innerHTML = tablaEscaneos(d.ultimos, true);
@@ -177,15 +177,18 @@ async function cargarDash() {
 function tablaEscaneos(list, corto) {
   var cols = corto ? ['Hora', 'Servidor', 'QR / Lugar', 'Validez', 'Programado', 'Estado', 'Orden', '']
     : ['Fecha / hora', 'Servidor', 'Cédula', 'QR / Lugar', 'Validez', 'GPS del celular', 'Malla', 'Programado', 'Dif.', 'Estado', 'Orden OK', 'Evidencia'];
-  return tabla(cols, list.map(function (e) {
+  var filas = list.map(function (e) {
     var serv = '<b>' + esc(e.grado + ' ' + e.nombres) + '</b>';
     var qr = '<b>QR ' + esc(e.qrNumero) + '</b> ' + esc(e.qrNombre);
     var ord = e.ordenCorrecto === 'SI' ? '<span class="badge b-ok">SÍ</span>' : e.ordenCorrecto === 'NO' ? '<span class="badge b-bad">NO</span>' : '';
-    var val = badgeValidez(e.validez) + (e.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(e.motivo) + '</div>' : '') + (e.alerta ? '<div class="small muted">' + esc(e.alerta) + '</div>' : '');
+    var val = (e.motivo && e.motivo.indexOf('FUERA DE HORARIO') === 0 ? '<div class="nocump nocump-sm">❌ NO CUMPLIDO</div>' : badgeValidez(e.validez)) + (e.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(e.motivo) + '</div>' : '') + (e.alerta ? '<div class="small muted">' + esc(e.alerta) + '</div>' : '');
     var gps = e.latDispositivo ? '<a target="_blank" href="https://www.google.com/maps?q=' + e.latDispositivo + ',' + e.lngDispositivo + '">a ' + esc(e.distanciaM) + ' m</a> <span class="small muted">±' + esc(e.precisionM) + '</span>' : '—';
     if (corto) return [e.hora, serv, qr, val, esc(e.horaEsperada || '-'), badgeHora(e.estadoHora) + ' <span class="small muted">' + difTxt(e.minutosDif) + '</span>', ord, btnFoto(e)];
     return [esc(e.fechaHora), serv, esc(e.cedula), qr, val, gps, esc(e.mallaNombre || 'Libre'), esc(e.horaEsperada || '-'), difTxt(e.minutosDif), badgeHora(e.estadoHora), ord, btnFoto(e) || '<span class="small muted">' + (e.retos ? 'sin foto' : '—') + '</span>'];
-  }), 'Sin escaneos.');
+  });
+  if (!filas.length) return '<div class="card muted center">Sin escaneos.</div>';
+  return '<div class="tbl-wrap"><table class="tbl"><thead><tr>' + cols.map(function (c) { return '<th>' + c + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    filas.map(function (f, i) { return '<tr class="' + (list[i].validez === 'VALIDO' ? '' : list[i].validez === 'PENDIENTE FOTO' ? 'pend' : 'mala') + '">' + f.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
 }
 
 /* ---------------- MAPAS (Google Maps) ---------------- */
@@ -457,7 +460,7 @@ async function cargarMallas(btn) {
   await run(btn, async function () {
     MALLAS = await apiT('mallasListar', { desde: val('#maDesde'), hasta: val('#maHasta'), distritoId: val('#maDist'), dia: hoy() });
     $('#maTabla').innerHTML = tabla(['Vigencia', 'Malla', 'Horario', 'Ruta programada', 'Personal', 'Cumplimiento hoy', 'Acciones'], MALLAS.map(function (m) {
-      var cumpl = m.activaDia ? '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>'
+      var cumpl = m.activaDia ? '<div class="progress"><div style="width:' + m.pct + '%"></div></div><span class="small">' + m.hechos + '/' + m.total + ' (' + m.pct + '%)</span>' + (m.noCumplidos ? '<div class="nocump nocump-sm">❌ ' + m.noCumplidos + ' NO CUMPLIDO' + (m.noCumplidos > 1 ? 'S' : '') + '</div>' : '')
         : '<span class="small muted">' + (m.fecha > hoy() ? 'Inicia ' + esc(m.vigencia.split(' – ')[0]) : 'Finalizada') + '</span>';
       return ['<b>' + esc(m.vigencia) + '</b>', '<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span> <span class="small muted">±' + m.tolerancia + ' min</span>' + (m.exigirFoto !== 'NO' ? ' <span class="badge b-warn">📷 foto</span>' : '') + '<div class="small muted">' + esc(m.distritoNombre) + '</div>',
         '<b>' + esc(m.horario) + '</b>', '<span class="small">' + esc(m.resumen) + '</span>',
@@ -487,8 +490,10 @@ async function formMalla(id) {
     '<div class="full"><label>Observación</label><input id="mfObs" value="' + esc(m.observacion) + '"></div>' +
     '</div>' +
     '<div class="mt"><h3>Puntos QR en orden de escaneo</h3>' +
-    '<div class="row mb"><select id="mfQr" class="grow" style="width:auto"></select><input type="time" id="mfHoraAdd" style="width:120px"><button class="btn btn-sm btn-primary" onclick="agregarPuntoMF()">+ Agregar</button></div>' +
-    '<div class="row mb"><button class="btn btn-sm" onclick="agregarTodosMF()">Agregar todos los QR en orden</button><button class="btn btn-sm" onclick="MF.puntos=[];renderMFPuntos()">Vaciar</button></div>' +
+    '<div class="add-qr"><div><label>Punto QR</label><select id="mfQr"></select></div>' +
+    '<div><label>Hora(s) en que debe escanearse <span style="color:var(--rojo)">*</span></label><div id="mfHoras" class="horas"></div></div>' +
+    '<div style="align-self:end"><button class="btn btn-primary" onclick="agregarPuntoMF()">+ Agregar a la malla</button></div></div>' +
+    '<div class="row mb"><span class="small muted grow">La hora es obligatoria. Un mismo QR puede agregarse con varias horas. Los puntos se ordenan por hora automáticamente.</span><button class="btn btn-sm" onclick="if(MF.puntos.length&&confirm(\'¿Quitar todos los puntos?\')){MF.puntos=[];renderMFPuntos()}">Vaciar</button></div>' +
     '<div class="pt-list" id="mfPuntos"></div></div>' +
     '<div class="mt"><div id="mfMap" class="map map-sm"></div></div>' +
     '<p class="small muted mt">👥 El personal se asigna desde la pantalla <b>Usuarios</b> (o con el botón 👥 de la malla).</p>' +
@@ -506,22 +511,43 @@ async function cargarMFDistrito(dId) {
     var ids = MF.qrs.map(function (q) { return q.id; });
     MF.puntos = MF.puntos.filter(function (p) { return ids.indexOf(p.qrId) > -1; });
     $('#mfQr').innerHTML = MF.qrs.map(function (q) { return '<option value="' + q.id + '">QR ' + q.numero + ' · ' + esc(q.nombre) + (q.hora ? ' (' + q.hora + ')' : '') + '</option>'; }).join('') || '<option value="">No hay QR en este distrito</option>';
-    $('#mfQr').onchange = function () { var q = MF.qrs.find(function (x) { return x.id === val('#mfQr'); }); $('#mfHoraAdd').value = q && q.hora ? q.hora : ''; };
+    $('#mfQr').onchange = function () { var q = MF.qrs.find(function (x) { return x.id === val('#mfQr'); }); MF.horasAdd = [q && q.hora ? q.hora : '']; renderHorasAdd(); };
     $('#mfQr').onchange();
     renderMFPuntos();
   } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }
-function agregarPuntoMF() { var id = val('#mfQr'); if (!id) return; MF.puntos.push({ qrId: id, hora: val('#mfHoraAdd') }); renderMFPuntos(); }
-function agregarTodosMF() { MF.qrs.slice().sort(function (a, b) { return a.numero - b.numero; }).forEach(function (q) { MF.puntos.push({ qrId: q.id, hora: q.hora || '' }); }); renderMFPuntos(); }
-function moverPuntoMF(i, d) { var j = i + d; if (j < 0 || j >= MF.puntos.length) return; var t = MF.puntos[i]; MF.puntos[i] = MF.puntos[j]; MF.puntos[j] = t; renderMFPuntos(); }
+/* Horas a agregar para el QR seleccionado (una o varias, mínimo una) */
+function renderHorasAdd() {
+  var h = MF.horasAdd && MF.horasAdd.length ? MF.horasAdd : [''];
+  $('#mfHoras').innerHTML = h.map(function (x, i) {
+    return '<span class="hchip"><input type="time" value="' + esc(x) + '" onchange="MF.horasAdd[' + i + ']=this.value">' +
+      (h.length > 1 ? '<button class="x" title="Quitar hora" onclick="MF.horasAdd.splice(' + i + ',1);renderHorasAdd()">×</button>' : '') + '</span>';
+  }).join('') + '<button class="btn btn-sm" onclick="MF.horasAdd.push(\'\');renderHorasAdd()">+ otra hora</button>';
+  MF.horasAdd = h;
+}
+function ordenarPuntosMF() {
+  MF.puntos.sort(function (a, b) { return (a.hora || '99:99') < (b.hora || '99:99') ? -1 : (a.hora || '99:99') > (b.hora || '99:99') ? 1 : 0; });
+}
+function agregarPuntoMF() {
+  var id = val('#mfQr'); if (!id) return;
+  var horas = $$('#mfHoras input').map(function (i) { return i.value; }).filter(Boolean);
+  if (!horas.length) { toast('Ingrese al menos una hora para el punto.', 'err'); $('#mfHoras input').focus(); return; }
+  var q = MF.qrs.find(function (x) { return x.id === id; });
+  var rep = horas.filter(function (h) { return MF.puntos.some(function (p) { return p.qrId === id && p.hora === h; }); });
+  if (rep.length) { toast('QR ' + q.numero + ' ya está en la malla a las ' + rep.join(', ') + '.', 'err'); return; }
+  horas.forEach(function (h) { MF.puntos.push({ qrId: id, hora: h }); });
+  ordenarPuntosMF(); MF.horasAdd = ['']; renderHorasAdd(); renderMFPuntos();
+  toast('QR ' + q.numero + ' agregado ' + (horas.length > 1 ? horas.length + ' veces' : 'a las ' + horas[0]) + '.', 'ok');
+}
 function quitarPuntoMF(i) { MF.puntos.splice(i, 1); renderMFPuntos(); }
+function cambiarHoraMF(i, v) { MF.puntos[i].hora = v; ordenarPuntosMF(); renderMFPuntos(); }
 function renderMFPuntos() {
   var qm = {}; MF.qrs.forEach(function (q) { qm[q.id] = q; });
   $('#mfPuntos').innerHTML = MF.puntos.map(function (p, i) {
     var q = qm[p.qrId] || { numero: '?', nombre: '(no disponible)' };
     return '<div class="pt"><span class="num-icon"><span style="background:var(--azul)">' + (i + 1) + '</span></span><div><b>QR ' + q.numero + '</b> ' + esc(q.nombre) + '</div>' +
-      '<input type="time" value="' + esc(p.hora) + '" onchange="MF.puntos[' + i + '].hora=this.value">' +
-      '<div class="acciones"><button class="btn btn-sm" onclick="moverPuntoMF(' + i + ',-1)">↑</button><button class="btn btn-sm" onclick="moverPuntoMF(' + i + ',1)">↓</button><button class="btn btn-sm btn-danger" onclick="quitarPuntoMF(' + i + ')">✕</button></div></div>';
+      '<input type="time" required value="' + esc(p.hora) + '" style="' + (p.hora ? '' : 'border:2px solid var(--rojo);background:#fde2e2') + '" onchange="cambiarHoraMF(' + i + ', this.value)">' +
+      '<div class="acciones"><button class="btn btn-sm btn-danger" title="Quitar" onclick="quitarPuntoMF(' + i + ')">✕</button></div></div>';
   }).join('') || '<div class="muted small">Agregue los puntos en el orden en que deben escanearse.</div>';
   if (MF.map) {
     if (MF.capa) MF.capa.setMap(null);
@@ -540,6 +566,8 @@ function renderMFPuntos() {
   }
 }
 async function guardarMalla() {
+  if (!MF.puntos.length) { toast('Agregue al menos un punto QR con su hora.', 'err'); return; }
+  if (MF.puntos.some(function (p) { return !p.hora; })) { toast('Todos los puntos deben tener hora (marcados en rojo).', 'err'); return; }
   await run($('#mfBtn'), async function () {
     var r = await apiT('mallaGuardar', {
       id: MF.id, nombre: val('#mfNom'), fecha: val('#mfFecha'), fechaHasta: val('#mfHasta'), distritoId: esSuper() ? val('#mfDist') : USER.distritoId,
@@ -553,6 +581,7 @@ async function guardarMalla() {
 }
 function celdaCumpl(s, grupo) {
   if (!s) return '<span class="badge b-gray">Pendiente</span>';
+  if (s.noCumplido) return '<div class="nocump">❌ NO CUMPLIDO</div>' + (s.motivo ? '<div class="small" style="color:var(--rojo);font-weight:600;margin-top:4px">' + esc(s.motivo) + '</div>' : '<div class="small" style="color:var(--rojo);margin-top:4px">No se presentó en su horario</div>') + (grupo && s.nombres ? '<div class="small">' + esc(s.grado + ' ' + s.nombres) + '</div>' : '');
   if (s.validez !== 'VALIDO') return '<span class="small">' + s.hora + '</span> ' + badgeValidez(s.validez) + (s.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(s.motivo) + '</div>' : '') + (grupo ? '<div class="small">' + esc(s.grado + ' ' + s.nombres) + '</div>' : '');
   return '<b>' + s.hora + '</b> ' + badgeHora(s.estadoHora) + ' <span class="small muted">' + difTxt(s.minutosDif) + '</span>' +
     (s.ordenCorrecto === 'NO' ? '<br><span class="badge b-bad">Fuera de orden</span>' : '') + (s.nFotos ? ' <button class="btn btn-sm" onclick="verFoto(\'' + s.id + '\',0)">📷</button>' : '') +
@@ -561,15 +590,16 @@ function celdaCumpl(s, grupo) {
 async function verCumplimiento(id, dia) {
   try {
     var c = await apiT('mallaCumplimiento', id, dia || '');
-    var cols = ['Orden', 'Punto', 'Hora prog.'].concat(c.columnas.map(function (x) { return esc(x.nombre); }));
+    var cols = ['Orden', 'Punto', 'Hora / ventana'].concat(c.columnas.map(function (x) { return esc(x.nombre); }));
     var filas = c.filas.map(function (f) {
-      return ['<b>' + f.orden + '</b>', '<b>QR ' + f.qrNumero + '</b> ' + esc(f.qrNombre), esc(f.hora || 'libre')].concat(c.columnas.map(function (col) { return celdaCumpl(f.celdas[col.id], col.id === 'GRUPO'); }));
+      return ['<b>' + f.orden + '</b>', '<b>QR ' + f.qrNumero + '</b> ' + esc(f.qrNombre), '<b>' + esc(f.hora) + '</b><div class="small muted">' + esc(f.desde) + '–' + esc(f.hasta) + '</div>'].concat(c.columnas.map(function (col) { return celdaCumpl(f.celdas[col.id], col.id === 'GRUPO'); }));
     });
     var vig = c.malla.fecha === c.malla.fechaHasta ? c.malla.fecha : c.malla.fecha + ' a ' + c.malla.fechaHasta;
     modal('Cumplimiento · ' + c.malla.nombre,
       '<div class="row mb"><span class="badge">Vigencia ' + esc(vig) + '</span><span class="badge">' + esc(c.distritoNombre) + '</span><span class="badge">' + c.malla.modo + '</span><span class="badge">±' + c.malla.tolerancia + ' min</span>' +
       '<span class="grow"></span><label style="margin:0">Día</label><input type="date" style="width:170px" min="' + c.malla.fecha + '" max="' + c.malla.fechaHasta + '" value="' + c.dia + '" onchange="verCumplimiento(\'' + id + '\', this.value)"></div>' +
-      '<div class="stats"><div class="stat"><div class="n">' + c.pct + '%</div><div class="l">Cumplimiento del ' + esc(c.dia) + '</div></div><div class="stat"><div class="n">' + c.hechos + '/' + c.total + '</div><div class="l">Puntos válidos</div></div><div class="stat"><div class="n">' + c.aTiempo + '</div><div class="l">A tiempo</div></div></div>' +
+      '<div class="stats"><div class="stat"><div class="n">' + c.pct + '%</div><div class="l">Cumplimiento del ' + esc(c.dia) + '</div></div><div class="stat"><div class="n">' + c.hechos + '/' + c.total + '</div><div class="l">Puntos válidos</div></div><div class="stat"><div class="n">' + c.aTiempo + '</div><div class="l">A tiempo</div></div>' +
+      '<div class="stat" style="' + (c.noCumplidos ? 'background:#cf3b3b;border-color:#cf3b3b' : '') + '"><div class="n" style="' + (c.noCumplidos ? 'color:#fff' : '') + '">' + c.noCumplidos + '</div><div class="l" style="' + (c.noCumplidos ? 'color:#fff;font-weight:700' : '') + '">❌ No cumplidos</div></div></div>' +
       tabla(cols, filas), true);
   } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }

@@ -105,16 +105,17 @@ async function cargarHome(mostrarVista) {
 function renderRuta(ruta) {
   if (!ruta.length) { $('#hRuta').innerHTML = '<div class="muted">No tiene una malla operativa asignada para hoy. Puede escanear los puntos QR de su distrito libremente.</div>'; return; }
   $('#hRuta').innerHTML = ruta.map(function (m) {
-    var sig = m.puntos.find(function (p) { return !p.hecho; });
+    var sig = m.puntos.find(function (p) { return !p.hecho && !p.noCumplido; });
     var hechos = m.puntos.filter(function (p) { return p.hecho; }).length;
     return '<div class="mb"><div class="row"><b class="grow">' + esc(m.nombre) + '</b><span class="badge">' + hechos + '/' + m.puntos.length + '</span></div>' +
       '<div class="small muted">' + (m.modo === 'GRUPAL' ? 'Grupal' : 'Individual') + ' · tolerancia ±' + m.tolerancia + ' min' + (m.companeros.length ? ' · Con: ' + esc(m.companeros.join(', ')) : '') + '</div>' +
       (m.observacion ? '<div class="small">' + esc(m.observacion) + '</div>' : '') +
       m.puntos.map(function (p) {
-        var cls = p.hecho ? 'ok' : (sig && sig.id === p.id ? 'next' : '');
-        return '<div class="pt ' + cls + '"><div class="n">' + (p.hecho ? '✓' : p.orden) + '</div><div class="info"><b>QR ' + p.qrNumero + ' · ' + esc(p.qrNombre) + '</b>' +
-          '<span class="small muted">' + (p.hora ? 'Programado ' + p.hora : 'Sin hora') + (p.hecho ? ' · escaneado ' + p.horaEscaneo + (p.por ? ' por ' + esc(p.por) : '') : '') + '</span> ' + (p.hecho ? badge(p.estadoHora) : '') + '</div>' +
-          (!p.hecho ? '<a class="btn btn-sm" target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '">Ir</a>' : '') + '</div>';
+        var cls = p.hecho ? 'ok' : p.noCumplido ? 'mal' : (sig && sig.id === p.id ? 'next' : '');
+        return '<div class="pt ' + cls + '"><div class="n">' + (p.hecho ? '✓' : p.noCumplido ? '✕' : p.orden) + '</div><div class="info"><b>' + esc(p.hora) + ' · QR ' + p.qrNumero + ' · ' + esc(p.qrNombre) + '</b>' +
+          '<span class="small muted">Ventana ' + esc(p.desde) + '–' + esc(p.hasta) + (p.hecho ? ' · escaneado ' + p.horaEscaneo + (p.por ? ' por ' + esc(p.por) : '') : '') + '</span> ' +
+          (p.hecho ? '<span class="badge b-ok">CUMPLIDO</span>' : p.noCumplido ? '<span class="badge" style="background:#cf3b3b;color:#fff">NO CUMPLIDO</span>' : '') + '</div>' +
+          (!p.hecho && !p.noCumplido ? '<a class="btn btn-sm" target="_blank" href="https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng + '">Ir</a>' : '') + '</div>';
       }).join('') + '</div>';
   }).join('');
 }
@@ -190,14 +191,44 @@ function obtenerGeoPreciso(onProgreso) {
   });
 }
 
-function procesar(codigo) {
+/** PASO 1: al escanear se verifica de inmediato la malla y el horario (antes del GPS) */
+async function procesar(codigo) {
   codigo = String(codigo || '').trim();
   if (!codigo || PROCESANDO) return;
   CODIGO = codigo; QR_PENDIENTE = ''; limpiarUrl();
-  $('#gpsIco').textContent = '📍'; $('#gpsTit').textContent = 'Código QR leído';
-  $('#gpsTxt').textContent = 'Para registrar el punto debe confirmar que está en el lugar. Presione el botón para activar su GPS.';
-  $('#gpsBtn').disabled = false; $('#gpsBtn').innerHTML = '📍 ACTIVAR GPS'; $('#gpsInfo').textContent = '';
-  mostrar('vGps');
+  PROCESANDO = true;
+  mostrar('vRes');
+  $('#resBox').innerHTML = '<div class="res-ico">⏳</div><h2>Verificando su horario...</h2>';
+  try {
+    var v = await api('polVerificar', TOKEN, CODIGO, navigator.userAgent);
+    PROCESANDO = false;
+    if (v.tipo !== 'OK') { mostrarBloqueo(v); return; }
+    $('#gpsIco').textContent = '📍'; $('#gpsTit').textContent = v.qr;
+    $('#gpsTxt').innerHTML = (v.malla ? '<b>' + esc(v.malla) + '</b> · ' : '') + 'Programado <b>' + esc(v.horaProgramada) + '</b>' + (v.desde ? ' <span class="badge b-ok">Horario correcto (' + esc(v.desde) + '–' + esc(v.hasta) + ')</span>' : '') +
+      '<br>Presione el botón para activar su GPS y confirmar que está en el lugar.';
+    $('#gpsBtn').disabled = false; $('#gpsBtn').innerHTML = '📍 ACTIVAR GPS'; $('#gpsBtn').onclick = activarGps; $('#gpsInfo').textContent = '';
+    mostrar('vGps');
+  } catch (e) {
+    PROCESANDO = false;
+    if (!e.silent) $('#resBox').innerHTML = '<div class="res-ico">❌</div><h2>No se registró</h2><p>' + esc(e.message) + '</p>';
+  }
+}
+
+/** Pantallas de horario adelantado / postergado / fuera de malla */
+function mostrarBloqueo(b) {
+  mostrar('vRes');
+  var cfg = {
+    ADELANTADO: { ico: '⏰', col: '#c98a00', fondo: '#fff3c4', grande: 'Retorne a las ' + b.horaProgramada },
+    POSTERGADO: { ico: '⌛', col: '#cf3b3b', fondo: '#fde2e2', grande: 'Debió estar aquí a las ' + b.horaProgramada },
+    FUERA_MALLA: { ico: '🚫', col: '#cf3b3b', fondo: '#fde2e2', grande: '' },
+    HECHO: { ico: 'ℹ️', col: '#1a4fa3', fondo: '#e8eef9', grande: '' }
+  }[b.tipo] || { ico: 'ℹ️', col: '#1a4fa3', fondo: '#e8eef9', grande: '' };
+  $('#resBox').innerHTML = '<div class="res-ico">' + cfg.ico + '</div>' +
+    '<h2 style="color:' + cfg.col + '">' + esc(b.titulo) + '</h2><p class="muted">' + esc(b.qr || '') + (b.malla ? ' · ' + esc(b.malla) : '') + '</p>' +
+    '<div style="background:' + cfg.fondo + ';border:2px solid ' + cfg.col + ';border-radius:14px;padding:16px;margin-top:10px">' +
+    (cfg.grande ? '<div style="font-size:26px;font-weight:800;color:' + cfg.col + '">' + esc(cfg.grande) + '</div>' : '') +
+    '<div style="margin-top:6px">' + esc(b.texto) + '</div>' + (b.proximo ? '<div class="small mt">' + esc(b.proximo) + '</div>' : '') + '</div>';
+  if (navigator.vibrate) navigator.vibrate(b.tipo === 'ADELANTADO' ? [100, 60, 100] : [200, 100, 200]);
 }
 function cancelarRegistro() { detenerCamara(); CODIGO = ''; irHome(); }
 
@@ -212,6 +243,7 @@ async function activarGps() {
     btn.innerHTML = '⏳ Verificando...';
     RESP = await api('polEscanear', TOKEN, CODIGO, GEO, navigator.userAgent);
     PROCESANDO = false;
+    if (RESP.bloqueo) { mostrarBloqueo(RESP.bloqueo); return; }
     siguientePaso();
   } catch (e) {
     PROCESANDO = false;
