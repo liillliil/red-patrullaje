@@ -113,3 +113,17 @@ table.tbl{border-collapse:collapse;width:100%;font-size:13px}
 .gm-num{width:28px;height:28px;border-radius:50%;color:#fff;font:700 12px system-ui,Arial,sans-serif;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.5);transform:translateY(50%);cursor:pointer}
 .gm-dot{border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);transform:translateY(50%);cursor:pointer}
 .gm-style .pop{font-size:13px;line-height:1.45;max-width:260px}
+
+/* NO CUMPLIDO: rojo muy visible */
+.nocump{background:#cf3b3b;color:#fff;font-weight:800;padding:8px 10px;border-radius:8px;text-align:center;letter-spacing:.3px;box-shadow:0 2px 8px rgba(207,59,59,.35)}
+.nocump-sm{display:inline-block;padding:3px 9px;font-size:12px;margin-top:4px}
+tr.mala td{background:#fdecec}
+tr.mala td:first-child{box-shadow:inset 6px 0 0 #cf3b3b}
+tr.pend td{background:#fff8e6}
+/* Formulario de malla: QR + varias horas */
+.add-qr{display:grid;grid-template-columns:1fr 1.3fr auto;gap:12px;align-items:start;background:var(--azul3);padding:12px;border-radius:10px;margin-bottom:10px}
+.horas{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.hchip{display:inline-flex;align-items:center;background:#fff;border:1px solid var(--borde);border-radius:8px;padding:2px 4px}
+.hchip input{border:0;padding:6px;width:118px}
+.hchip .x{font-size:18px;padding:0 4px}
+@media (max-width:900px){.add-qr{grid-template-columns:1fr}}
