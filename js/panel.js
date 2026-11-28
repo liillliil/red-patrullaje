@@ -6,7 +6,7 @@ var LS_KEY = 'rp_panel_token';
 var QRS = [], USUARIOS = [], MALLAS = [], DISTS_ALL = [], REPORTE = [];
 var MF = null, MAP_ESC = null, MAP_COB = null, COB_DATA = null, LEY = { esc: [], cob: [] }, SEC = 'dash', DASH_TIMER = null;
 var COLORES = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#0aa6b8', '#d61f9b', '#7aa800', '#c97b00', '#008080', '#9a6324', '#800000', '#1f3a93', '#e0457b', '#2e8b57', '#6a5acd'];
-var TITULOS = { dash: 'Tablero', mapa: 'Mapa de escaneos', cobertura: 'Rutas establecidas y cobertura', mallas: 'Malla operativa', qrs: 'Puntos QR', usuarios: 'Usuarios', distritos: 'Catálogo de distritos / servicios', reportes: 'Reporte de escaneos', cuenta: 'Mi cuenta' };
+var TITULOS = { dash: 'Tablero', mapa: 'Mapa de escaneos', cobertura: 'Rutas establecidas y cobertura', mallas: 'Malla operativa', qrs: 'Puntos (monedas)', estadisticas: 'Estadísticas por distrito', usuarios: 'Usuarios', distritos: 'Catálogo de distritos / servicios', reportes: 'Reporte de monedas', cuenta: 'Mi cuenta' };
 
 /* ---------------- utilidades ---------------- */
 alExpirar = function () { salir(true); };
@@ -75,7 +75,6 @@ function parseCoords(s) {
   var m = /(-?\d{1,3}\.\d+)\s*[,; ]\s*(-?\d{1,3}\.\d+)/.exec(String(s || ''));
   return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
 }
-function urlQR(q) { return (APP_URL || '') + '?qr=' + q.token; }
 
 /* ---------------- autenticación ---------------- */
 document.addEventListener('DOMContentLoaded', async function () {
@@ -126,8 +125,8 @@ async function iniciarPanel() {
   $('#userChip').innerHTML = '<b>' + esc(USER.nombres) + '</b> · ' + esc(USER.rol) + (USER.distritoNombre ? ' · ' + esc(USER.distritoNombre) : '');
   $$('[data-super]').forEach(function (b) { b.hidden = !esSuper(); });
   $$('[data-only-super]').forEach(function (b) { b.hidden = !esSuper(); });
-  ['#dDist', '#mDist', '#cDist', '#maDist', '#qDist', '#uDist', '#rDist'].forEach(function (s) { $(s).innerHTML = opcionesDistrito(esSuper() ? '' : USER.distritoId, true); });
-  ['#mDesde', '#mHasta', '#cFecha', '#maDesde', '#maHasta', '#rDesde', '#rHasta'].forEach(function (s) { $(s).value = hoy(); });
+  ['#dDist', '#mDist', '#cDist', '#maDist', '#qDist', '#uDist', '#rDist', '#eDist'].forEach(function (s) { $(s).innerHTML = opcionesDistrito(esSuper() ? '' : USER.distritoId, true); });
+  ['#mDesde', '#mHasta', '#cFecha', '#maDesde', '#maHasta', '#rDesde', '#rHasta', '#eDesde', '#eHasta'].forEach(function (s) { $(s).value = hoy(); });
   $('#cRadio').value = CFG.radio;
   if (esSuper() && !DISTRITOS.length) toast('Primero cree un distrito/servicio en el catálogo.', '', 6000);
   if (DASH_TIMER) clearInterval(DASH_TIMER);
@@ -142,7 +141,7 @@ function ir(sec) {
   $('#secTitle').textContent = TITULOS[sec] || '';
   $('#sidebar').classList.remove('open');
   var loaders = {
-    dash: cargarDash, qrs: cargarQRs, usuarios: cargarUsuarios, distritos: cargarDistritos, mallas: function () { cargarMallas(); },
+    dash: cargarDash, qrs: cargarQRs, estadisticas: function () { if (!ESTAD) cargarEstadisticas(); }, usuarios: cargarUsuarios, distritos: cargarDistritos, mallas: function () { cargarMallas(); },
     mapa: function () { cargarPoliciasSelect('mPol', val('#mDist')); if (!MAP_ESC) consultarMapa(); },
     cobertura: function () { if (!MAP_COB) consultarCobertura(); },
     reportes: function () { cargarPoliciasSelect('rPol', val('#rDist')); },
@@ -163,7 +162,7 @@ async function cargarDash() {
   try {
     var d = await apiT('dashboard', val('#dDist'));
     $('#dHora').textContent = 'Actualizado ' + new Date().toLocaleTimeString();
-    var st = [['QR activos', d.qrs], ['Servidores activos', d.policias], ['Patrullando hoy', d.patrullandoHoy], ['Escaneos hoy', d.escaneosHoy], ['Mallas hoy', d.mallasHoy.length], ['No válidos hoy', d.alertasHoy], ['Registros pendientes', d.pendientes]];
+    var st = [['Puntos (monedas)', d.qrs], ['Servidores activos', d.policias], ['Patrullando hoy', d.patrullandoHoy], ['Monedas atrapadas hoy', d.escaneosHoy], ['Mallas hoy', d.mallasHoy.length], ['No válidos hoy', d.alertasHoy], ['Registros pendientes', d.pendientes]];
     $('#dStats').innerHTML = st.map(function (s) { return '<div class="stat"><div class="n">' + s[1] + '</div><div class="l">' + s[0] + '</div></div>'; }).join('');
     $('#dMallas').innerHTML = tabla(['Malla', 'Distrito', 'Horario', 'Ruta', 'Asignados', 'Cumplimiento', ''], d.mallasHoy.map(function (m) {
       return ['<b>' + esc(m.nombre) + '</b><br><span class="badge">' + m.modo + '</span>', esc(m.distritoNombre), '<b>' + esc(m.horario) + '</b>', '<span class="small">' + esc(m.resumen) + '</span>', '<span class="small">' + m.nAsignados + ' servidores</span>',
@@ -175,11 +174,11 @@ async function cargarDash() {
 }
 
 function tablaEscaneos(list, corto) {
-  var cols = corto ? ['Hora', 'Servidor', 'QR / Lugar', 'Validez', 'Programado', 'Estado', 'Orden', '']
-    : ['Fecha / hora', 'Servidor', 'Cédula', 'QR / Lugar', 'Validez', 'GPS del celular', 'Malla', 'Programado', 'Dif.', 'Estado', 'Orden OK', 'Evidencia'];
+  var cols = corto ? ['Hora', 'Servidor', 'Moneda / lugar', 'Validez', 'Programado', 'Estado', 'Orden', '']
+    : ['Fecha / hora', 'Servidor', 'Cédula', 'Moneda / lugar', 'Validez', 'GPS del celular', 'Malla', 'Programado', 'Dif.', 'Estado', 'Orden OK', 'Evidencia'];
   var filas = list.map(function (e) {
     var serv = '<b>' + esc(e.grado + ' ' + e.nombres) + '</b>';
-    var qr = '<b>QR ' + esc(e.qrNumero) + '</b> ' + esc(e.qrNombre);
+    var qr = '<b>P' + esc(e.qrNumero) + '</b> ' + esc(e.qrNombre);
     var ord = e.ordenCorrecto === 'SI' ? '<span class="badge b-ok">SÍ</span>' : e.ordenCorrecto === 'NO' ? '<span class="badge b-bad">NO</span>' : '';
     var val = (e.motivo && e.motivo.indexOf('FUERA DE HORARIO') === 0 ? '<div class="nocump nocump-sm">❌ NO CUMPLIDO</div>' : badgeValidez(e.validez)) + (e.motivo ? '<div class="small" style="color:var(--rojo)">' + esc(e.motivo) + '</div>' : '') + (e.alerta ? '<div class="small muted">' + esc(e.alerta) + '</div>' : '');
     var gps = e.latDispositivo ? '<a target="_blank" href="https://www.google.com/maps?q=' + e.latDispositivo + ',' + e.lngDispositivo + '">a ' + esc(e.distanciaM) + ' m</a> <span class="small muted">±' + esc(e.precisionM) + '</span>' : '—';
@@ -194,12 +193,12 @@ function tablaEscaneos(list, corto) {
 /* ---------------- MAPAS (Google Maps) ---------------- */
 function popupEsc(e) {
   return '<div class="pop"><div style="margin-bottom:4px">' + badgeValidez(e.validez) + '</div><b>' + esc(e.grado + ' ' + e.nombres) + '</b><br>CI: ' + esc(e.cedula) +
-    '<br><b>QR ' + esc(e.qrNumero) + '</b> – ' + esc(e.qrNombre) +
+    '<br>🪙 <b>Punto ' + esc(e.qrNumero) + '</b> – ' + esc(e.qrNombre) +
     '<br>🕒 ' + esc(e.fechaHora) +
     (e.mallaNombre ? '<br>Malla: ' + esc(e.mallaNombre) + ' · orden ' + esc(e.ordenEsperado) : '<br>Escaneo libre') +
     '<br>Programado: ' + esc(e.horaEsperada || '-') + ' ' + badgeHora(e.estadoHora) + ' ' + difTxt(e.minutosDif) +
     (e.ordenCorrecto ? '<br>Orden correcto: ' + e.ordenCorrecto : '') +
-    (e.distanciaM !== '' ? '<br>📱 Celular a <b>' + esc(e.distanciaM) + ' m</b> del QR (±' + esc(e.precisionM) + ' m)' : '') +
+    (e.distanciaM !== '' ? '<br>📱 Celular a <b>' + esc(e.distanciaM) + ' m</b> de la moneda (±' + esc(e.precisionM) + ' m)' : '') +
     (e.motivo ? '<br><span style="color:#cf3b3b;font-weight:600">' + esc(e.motivo) + '</span>' : '') +
     (e.alerta ? '<br><span class="badge b-warn">' + esc(e.alerta) + '</span>' : '') +
     (e.nFotos ? (fotoVigente(e) ? '<br><button class="btn btn-sm" style="margin-top:6px" onclick="verFoto(\'' + e.id + '\',0)">📷 Ver foto de evidencia</button>' : '<br><span class="small muted">🗑 Foto caducada (' + (CFG.fotosDias || 10) + ' días)</span>') : '') +
@@ -227,9 +226,9 @@ async function consultarMapa(btn) {
     map.__info.close();
     limpiarCapas('esc');
     var lq = new Capa();
-    r.qrs.forEach(function (q) { lq.add(gmPunto(map, q.lat, q.lng, '#ffffff', 12, 'QR ' + q.numero + ' · ' + q.nombre, '<div class="pop"><b>QR ' + q.numero + '</b> – ' + esc(q.nombre) + '<br>' + esc(q.hora || 'Sin hora') + '</div>', '#555')); });
+    r.qrs.forEach(function (q) { lq.add(gmPunto(map, q.lat, q.lng, '#ffd34d', 12, 'Punto ' + q.numero + ' · ' + q.nombre, '<div class="pop"><b>🪙 Punto ' + q.numero + '</b> – ' + esc(q.nombre) + '</div>', '#7a5a12')); });
     lq.setMap(map);
-    LEY.esc.push({ layer: lq, color: '#999', html: '<b>Puntos QR</b> <span class="muted">(' + r.qrs.length + ')</span>', on: true });
+    LEY.esc.push({ layer: lq, color: '#999', html: '<b>Puntos (monedas)</b> <span class="muted">(' + r.qrs.length + ')</span>', on: true });
     var grupos = {}, orden = [];
     r.escaneos.forEach(function (e) { if (!grupos[e.usuarioId]) { grupos[e.usuarioId] = []; orden.push(e.usuarioId); } grupos[e.usuarioId].push(e); });
     orden.forEach(function (uid, i) {
@@ -242,15 +241,15 @@ async function consultarMapa(btn) {
         bounds.push([Number(e.lat), Number(e.lng)]);
         if (e.validez === 'VALIDO') {
           k++;
-          lg.add(gmNum(map, e.lat, e.lng, k, color, popupEsc(e), e.hora + ' · QR ' + e.qrNumero + ' · VÁLIDO'));
+          lg.add(gmNum(map, e.lat, e.lng, k, color, popupEsc(e), e.hora + ' · Punto ' + e.qrNumero + ' · VÁLIDO'));
         } else {
           malos++;
           var rojo = e.validez === 'PENDIENTE FOTO' ? '#c98a00' : '#cf3b3b';
-          lg.add(gmNum(map, e.lat, e.lng, '✕', rojo, popupEsc(e), e.hora + ' · QR ' + e.qrNumero + ' · ' + e.validez));
+          lg.add(gmNum(map, e.lat, e.lng, '✕', rojo, popupEsc(e), e.hora + ' · Punto ' + e.qrNumero + ' · ' + e.validez));
           if (e.latDispositivo) {
             // dónde estaba realmente el celular
             lg.add(gmLinea([[e.lat, e.lng], [e.latDispositivo, e.lngDispositivo]], rojo, 2, true, false));
-            lg.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, rojo, 16, 'Ubicación real del celular (' + e.distanciaM + ' m del QR)', popupEsc(e), '#fff'));
+            lg.add(gmPunto(map, e.latDispositivo, e.lngDispositivo, rojo, 16, 'Ubicación real del celular (' + e.distanciaM + ' m de la moneda)', popupEsc(e), '#fff'));
             if (Number(e.distanciaM) < 20000) bounds.push([Number(e.latDispositivo), Number(e.lngDispositivo)]);
           }
         }
@@ -291,9 +290,9 @@ function dibujarCobertura() {
       unicos[p.qrId] = 1; bounds.push([p.lat, p.lng]);
       var ok = !!escPorPunto[p.id]; if (ok) hechos++;
       lg.add(gmCirculo(p.lat, p.lng, radio, color, .3));
-      lg.add(gmNum(map, p.lat, p.lng, p.orden, color, '<div class="pop"><b>' + esc(m.nombre) + '</b><br>Orden ' + p.orden + ': <b>QR ' + p.qrNumero + '</b> – ' + esc(p.qrNombre) +
+      lg.add(gmNum(map, p.lat, p.lng, p.orden, color, '<div class="pop"><b>' + esc(m.nombre) + '</b><br>Orden ' + p.orden + ': <b>Punto ' + p.qrNumero + '</b> – ' + esc(p.qrNombre) +
         '<br>Hora programada: ' + esc(p.hora || 'libre') + '<br>Radio de cobertura: ' + radio + ' m<br>Integrantes: ' + esc(m.asignados.join(', ')) +
-        '<br>Estado: ' + (ok ? '<span class="badge b-ok">Escaneado</span>' : '<span class="badge b-warn">Pendiente</span>') + '</div>', 'Orden ' + p.orden + ' · QR ' + p.qrNumero));
+        '<br>Estado: ' + (ok ? '<span class="badge b-ok">Atrapada</span>' : '<span class="badge b-warn">Pendiente</span>') + '</div>', 'Orden ' + p.orden + ' · ' + p.qrNombre));
     });
     lg.setMap(map);
     var area = Math.round(m.puntos.length * Math.PI * radio * radio);
@@ -305,11 +304,11 @@ function dibujarCobertura() {
   var lAll = new Capa();
   COB_DATA.qrs.forEach(function (q) {
     lAll.add(gmCirculo(q.lat, q.lng, radio, '#777777', .18));
-    lAll.add(gmPunto(map, q.lat, q.lng, '#333', 8, 'QR ' + q.numero + ' · ' + q.nombre, null, '#fff'));
+    lAll.add(gmPunto(map, q.lat, q.lng, '#333', 8, 'Punto ' + q.numero + ' · ' + q.nombre, null, '#fff'));
   });
   var allOn = !COB_DATA.mallas.length;
   if (allOn) { lAll.setMap(map); COB_DATA.qrs.forEach(function (q) { bounds.push([q.lat, q.lng]); }); }
-  LEY.cob.push({ layer: lAll, color: '#777', on: allOn, html: '<b>Todos los puntos QR</b><br><span class="muted">' + COB_DATA.qrs.length + ' puntos con radio de ' + radio + ' m</span>' });
+  LEY.cob.push({ layer: lAll, color: '#777', on: allOn, html: '<b>Todos los puntos</b><br><span class="muted">' + COB_DATA.qrs.length + ' puntos con radio de ' + radio + ' m</span>' });
   var lE = new Capa();
   COB_DATA.escaneos.forEach(function (e) {
     var okv = e.validez === 'VALIDO';
@@ -322,137 +321,138 @@ function dibujarCobertura() {
   gmAjustar(map, bounds, 18);
 }
 
-/* ---------------- PUNTOS QR ---------------- */
+/* ---------------- PUNTOS (MONEDAS VIRTUALES) ---------------- */
 async function cargarQRs() {
   try { QRS = await apiT('qrsListar', { distritoId: val('#qDist') }); renderQRs(); } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }
 function renderQRs() {
   var b = val('#qBuscar').toLowerCase();
   var l = QRS.filter(function (q) { return !b || String(q.numero) === b || q.nombre.toLowerCase().indexOf(b) > -1; });
-  $('#qTabla').innerHTML = tabla(['<input type="checkbox" onchange="$$(\'.qchk\').forEach(function(c){c.checked=this.checked}.bind(this))">', 'N°', 'Lugar', 'Coordenadas', 'Hora', 'Distrito', 'Acciones'], l.map(function (q) {
-    return ['<input type="checkbox" class="qchk" value="' + q.id + '">', '<b style="font-size:16px">' + q.numero + '</b>', '<b>' + esc(q.nombre) + '</b><br><span class="small muted">' + esc(q.descripcion) + '</span>',
-      '<a target="_blank" href="https://www.google.com/maps?q=' + q.lat + ',' + q.lng + '">' + q.lat.toFixed(6) + ', ' + q.lng.toFixed(6) + '</a>', esc(q.hora || '—'), esc(q.distritoNombre),
-      '<div class="acciones"><button class="btn btn-sm" onclick="verQR(\'' + q.id + '\')">🔳 Ver QR</button><button class="btn btn-sm" onclick="formQR(\'' + q.id + '\')">✏️ Editar</button><button class="btn btn-sm btn-danger" onclick="eliminarQR(\'' + q.id + '\')">🗑</button></div>'];
-  }), 'No hay puntos QR. Cree el primero con "+ Nuevo QR".');
+  $('#qTabla').innerHTML = tabla(['N°', 'Moneda', 'Lugar / entidad', 'Ubicación de la moneda', 'Sobre la vía', 'Radio', 'Distrito', 'Acciones'], l.map(function (q) {
+    var via = q.ajuste === 'VIA' ? '<span class="badge b-ok">✓ a ' + q.ajusteM + ' m de la entidad</span>' : '<span class="badge b-warn">Ubicada a mano</span>';
+    return ['<b style="font-size:16px">' + q.numero + '</b>', '<div style="width:44px;height:44px">' + coinSVG({ grado: 'GRADO', nombres: 'NOMBRE DEL POLICÍA', punto: q.nombre, hora: q.hora || '' }) + '</div>',
+      '<b>' + esc(q.nombre) + '</b><br><span class="small muted">' + esc(q.descripcion) + '</span>',
+      '<a target="_blank" href="https://www.google.com/maps?q=' + q.lat + ',' + q.lng + '">' + q.lat.toFixed(6) + ', ' + q.lng.toFixed(6) + '</a>', via,
+      (q.radio || CFG.geocerca || 30) + ' m', esc(q.distritoNombre),
+      '<div class="acciones"><button class="btn btn-sm" onclick="formQR(\'' + q.id + '\')">✏️ Editar</button><button class="btn btn-sm btn-danger" onclick="eliminarQR(\'' + q.id + '\')">🗑</button></div>'];
+  }), 'No hay puntos. Cree el primero con "+ Nuevo punto".');
 }
 function formQR(id) {
   var q = id ? QRS.find(function (x) { return x.id === id; }) : null;
   var dId = q ? q.distritoId : (val('#qDist') || distDefecto());
   var sig = 1 + QRS.filter(function (x) { return x.distritoId === dId; }).reduce(function (m, x) { return Math.max(m, x.numero); }, 0);
-  q = q || { numero: sig, nombre: '', descripcion: '', lat: '', lng: '', hora: '', distritoId: dId };
-  modal(id ? 'Editar QR N° ' + q.numero : 'Nuevo punto QR',
+  q = q || { numero: sig, nombre: '', descripcion: '', lat: '', lng: '', latEntidad: '', lngEntidad: '', hora: '', distritoId: dId };
+  modal(id ? 'Editar punto N° ' + q.numero : 'Nuevo punto (moneda)',
     '<div class="form-grid">' +
-    '<div><label>N° de orden</label><input type="number" min="1" id="fqNum" value="' + q.numero + '"></div>' +
-    '<div><label>Hora programada (opcional)</label><input type="time" id="fqHora" value="' + esc(q.hora) + '"></div>' +
-    '<div><label>Radio de geocerca (m)</label><input type="number" min="10" max="500" id="fqRadio" value="' + esc(q.radio || '') + '" placeholder="' + (CFG.geocerca || 50) + ' (por defecto)"></div>' +
-    '<div class="full"><label>Nombre del lugar</label><input id="fqNom" value="' + esc(q.nombre) + '" placeholder="Ej: Parque Central"></div>' +
-    '<div class="full"><label>Descripción / referencia</label><input id="fqDesc" value="' + esc(q.descripcion) + '"></div>' +
+    '<div><label>N° del punto</label><input type="number" min="1" id="fqNum" value="' + q.numero + '"></div>' +
+    '<div><label>Radio para atrapar (m)</label><input type="number" min="10" max="200" id="fqRadio" value="' + esc(q.radio || '') + '" placeholder="' + (CFG.geocerca || 30) + ' (por defecto)"></div>' +
+    '<div class="full"><label>Nombre del lugar / entidad</label><input id="fqNom" value="' + esc(q.nombre) + '" placeholder="Ej: Fiscalía, Gasolinera, Parque Central"></div>' +
+    '<div class="full"><label>Referencia</label><input id="fqDesc" value="' + esc(q.descripcion) + '"></div>' +
     (esSuper() ? '<div class="full"><label>Distrito / Servicio</label><select id="fqDist">' + opcionesDistrito(q.distritoId) + '</select></div>' : '') +
-    '<div class="full"><label>Pegar coordenadas (ej: -2.170998, -79.922359 o enlace de Google Maps)</label><input id="fqPaste" oninput="pegarCoords(this.value)"></div>' +
-    '<div><label>Latitud</label><input id="fqLat" value="' + q.lat + '" oninput="moverMarcadorQR()"></div>' +
-    '<div><label>Longitud</label><input id="fqLng" value="' + q.lng + '" oninput="moverMarcadorQR()"></div>' +
-    '<div class="full"><div class="row mb"><span class="muted small grow">Haga clic en el mapa o arrastre el marcador para ubicar el punto.</span><button class="btn btn-sm" onclick="miUbicacionQR(this)">📍 Usar mi ubicación</button></div><div id="fqMap" class="map map-sm"></div></div>' +
+    '<div class="full"><label>Ubicación de la ENTIDAD (pegue coordenadas o un enlace de Google Maps, o haga clic en el mapa)</label><input id="fqPaste" oninput="pegarCoords(this.value)" placeholder="-2.170998, -79.922359"></div>' +
+    '<input type="hidden" id="fqLatE" value="' + q.latEntidad + '"><input type="hidden" id="fqLngE" value="' + q.lngEntidad + '">' +
+    '<input type="hidden" id="fqLat" value="' + q.lat + '"><input type="hidden" id="fqLng" value="' + q.lng + '">' +
+    '<div class="full"><div class="row mb"><span class="small muted grow">🏢 = entidad · 🪙 = moneda. La moneda se ubica sola sobre la <b>vía más cercana</b>, nunca dentro de una edificación. Puede arrastrarla por la vía.</span><button class="btn btn-sm" onclick="miUbicacionQR(this)">📍 Mi ubicación</button></div>' +
+    '<div id="fqMap" class="map map-sm" style="height:340px"></div><div id="fqVia" class="small mt"></div></div>' +
     '</div><div class="modal-foot"><button class="btn" onclick="cerrarModal()">Cancelar</button><button class="btn btn-primary" id="fqBtn" onclick="guardarQR(\'' + (id || '') + '\')">Guardar</button></div>');
   setTimeout(async function () {
     if (!document.getElementById('fqMap')) return;
     var map;
     try { map = await gmMapa($('#fqMap'), { mapTypeId: 'hybrid' }); } catch (e) { toast(e.message, 'err'); return; }
     if (!document.getElementById('fqMap')) return;
-    MF = { map: map, marker: null };
-    if (q.lat) { ponerMarcadorQR(q.lat, q.lng); map.setCenter({ lat: Number(q.lat), lng: Number(q.lng) }); map.setZoom(19); }
+    MF = { map: map, ent: null, coin: null, linea: null };
+    if (q.latEntidad) { ponerEntidad(q.latEntidad, q.lngEntidad, false); ponerMoneda(q.lat, q.lng); map.setCenter({ lat: Number(q.lat), lng: Number(q.lng) }); map.setZoom(19); }
     else if (QRS.length) { map.setCenter({ lat: QRS[0].lat, lng: QRS[0].lng }); map.setZoom(16); }
-    map.addListener('click', function (ev) {
-      $('#fqLat').value = ev.latLng.lat().toFixed(7); $('#fqLng').value = ev.latLng.lng().toFixed(7);
-      ponerMarcadorQR(ev.latLng.lat(), ev.latLng.lng());
-    });
+    map.addListener('click', function (ev) { ponerEntidad(ev.latLng.lat(), ev.latLng.lng(), true); });
   }, 120);
 }
-function ponerMarcadorQR(lat, lng) {
-  var pos = { lat: Number(lat), lng: Number(lng) };
-  if (!MF.marker) {
-    MF.marker = new google.maps.marker.AdvancedMarkerElement({ map: MF.map, position: pos, gmpDraggable: true, title: 'Arrastre para ajustar la ubicación' });
-    MF.marker.addListener('dragend', function () {
-      var p = gmLatLng(MF.marker.position);
-      $('#fqLat').value = Number(p.lat).toFixed(7); $('#fqLng').value = Number(p.lng).toFixed(7);
-    });
-  } else MF.marker.position = pos;
+function iconoDiv(html, css) { var d = document.createElement('div'); d.style.cssText = css; d.innerHTML = html; return d; }
+function ponerEntidad(lat, lng, ajustar) {
+  lat = Number(lat); lng = Number(lng);
+  $('#fqLatE').value = lat.toFixed(7); $('#fqLngE').value = lng.toFixed(7);
+  if (!MF.ent) MF.ent = new google.maps.marker.AdvancedMarkerElement({ map: MF.map, position: { lat: lat, lng: lng }, title: 'Entidad', content: iconoDiv('🏢', 'font-size:26px;transform:translateY(30%)') });
+  else MF.ent.position = { lat: lat, lng: lng };
+  if (ajustar) ajustarVia(lat, lng);
 }
-function moverMarcadorQR() {
-  var lat = Number(String(val('#fqLat')).replace(',', '.')), lng = Number(String(val('#fqLng')).replace(',', '.'));
-  if (!MF || !MF.map || !isFinite(lat) || !isFinite(lng) || !lat || !lng) return;
-  ponerMarcadorQR(lat, lng);
-  MF.map.setCenter({ lat: lat, lng: lng });
-  if (MF.map.getZoom() < 18) MF.map.setZoom(18);
+function ponerMoneda(lat, lng) {
+  lat = Number(lat); lng = Number(lng);
+  $('#fqLat').value = lat.toFixed(7); $('#fqLng').value = lng.toFixed(7);
+  if (!MF.coin) {
+    MF.coin = new google.maps.marker.AdvancedMarkerElement({ map: MF.map, position: { lat: lat, lng: lng }, gmpDraggable: true, title: 'Moneda (arrástrela por la vía)',
+      content: iconoDiv(coinSVG({ grado: '', nombres: val('#fqNom') || 'MONEDA', punto: '', hora: '' }), 'width:46px;height:46px;transform:translateY(50%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))') });
+    MF.coin.addListener('dragend', function () { var p = gmLatLng(MF.coin.position); ajustarVia(p.lat, p.lng, true); });
+  } else MF.coin.position = { lat: lat, lng: lng };
+  if (MF.linea) MF.linea.setMap(null);
+  if ($('#fqLatE').value) { MF.linea = gmLinea([[$('#fqLatE').value, $('#fqLngE').value], [lat, lng]], '#ffd34d', 2, true, false); MF.linea.setMap(MF.map); }
 }
-function pegarCoords(s) { var c = parseCoords(s); if (c) { $('#fqLat').value = c.lat; $('#fqLng').value = c.lng; moverMarcadorQR(); } }
+async function ajustarVia(lat, lng, desdeMoneda) {
+  $('#fqVia').innerHTML = '⏳ Buscando la vía más cercana...';
+  try {
+    var v = await apiT('puntoAjustarVia', lat, lng);
+    ponerMoneda(v.lat, v.lng);
+    MF.manual = !v.ok;
+    $('#fqVia').innerHTML = v.ok ? '<span class="badge b-ok">✓ ' + esc(v.mensaje) + '</span>' : '<span class="badge b-warn">⚠ ' + esc(v.mensaje) + '</span> Arrastre la moneda 🪙 hasta la vía.';
+    if (!desdeMoneda && MF.map.getZoom() < 18) { MF.map.setCenter({ lat: v.lat, lng: v.lng }); MF.map.setZoom(19); }
+  } catch (e) { $('#fqVia').textContent = e.message; }
+}
+function pegarCoords(s) { var c = parseCoords(s); if (c && MF && MF.map) { ponerEntidad(c.lat, c.lng, true); MF.map.setCenter(c); MF.map.setZoom(19); } }
 function miUbicacionQR(btn) {
   if (!navigator.geolocation) { toast('El navegador no permite geolocalización.', 'err'); return; }
   btn.disabled = true;
   navigator.geolocation.getCurrentPosition(function (p) {
-    btn.disabled = false; $('#fqLat').value = p.coords.latitude.toFixed(7); $('#fqLng').value = p.coords.longitude.toFixed(7); moverMarcadorQR();
+    btn.disabled = false; ponerEntidad(p.coords.latitude, p.coords.longitude, true);
+    MF.map.setCenter({ lat: p.coords.latitude, lng: p.coords.longitude }); MF.map.setZoom(19);
     toast('Ubicación obtenida (precisión ' + Math.round(p.coords.accuracy) + ' m)');
   }, function () { btn.disabled = false; toast('No se pudo obtener la ubicación.', 'err'); }, { enableHighAccuracy: true, timeout: 10000 });
 }
-async function guardarQR(id) {
+async function guardarQR(id, confirmarManual) {
+  if (!val('#fqLatE')) { toast('Ubique la entidad en el mapa.', 'err'); return; }
   await run($('#fqBtn'), async function () {
-    await apiT('qrGuardar', { id: id, numero: val('#fqNum'), nombre: val('#fqNom'), descripcion: val('#fqDesc'), lat: val('#fqLat'), lng: val('#fqLng'), hora: val('#fqHora'), radio: val('#fqRadio'), distritoId: esSuper() ? val('#fqDist') : USER.distritoId });
-    cerrarModal(); toast('QR guardado.', 'ok'); await cargarQRs();
+    var datos = { id: id, numero: val('#fqNum'), nombre: val('#fqNom'), descripcion: val('#fqDesc'), latEntidad: val('#fqLatE'), lngEntidad: val('#fqLngE'),
+      lat: val('#fqLat'), lng: val('#fqLng'), radio: val('#fqRadio'), distritoId: esSuper() ? val('#fqDist') : USER.distritoId, confirmarManual: confirmarManual === true };
+    try {
+      var r = await apiT('qrGuardar', datos);
+      cerrarModal(); toast('Punto guardado. ' + r.mensaje, 'ok', 6000); await cargarQRs();
+    } catch (e) {
+      if (String(e.message).indexOf('AJUSTE_VIA') === 0) {
+        if (window.confirm(e.message.replace(/^AJUSTE_VIA:\s*/, '') + '\n\n¿La moneda 🪙 ya está sobre la vía (no dentro de una edificación)?')) return guardarQR(id, true);
+        return;
+      }
+      throw e;
+    }
   });
 }
 async function eliminarQR(id) {
   var q = QRS.find(function (x) { return x.id === id; });
-  if (!await confirmar('¿Eliminar el QR N° ' + q.numero + ' (' + q.nombre + ')? El código impreso dejará de funcionar.', 'Eliminar')) return;
+  if (!await confirmar('¿Eliminar el punto N° ' + q.numero + ' (' + q.nombre + ')? Su moneda dejará de aparecer en mallas nuevas.', 'Eliminar')) return;
   try { toast(await apiT('qrEliminar', id), 'ok'); cargarQRs(); } catch (e) { toast(e.message, 'err'); }
 }
-async function regenerarQR(id) {
-  if (!await confirmar('Se generará un código nuevo y el QR impreso actual dejará de funcionar. ¿Continuar?')) return;
-  try { toast(await apiT('qrRegenerar', id), 'ok'); await cargarQRs(); verQR(id); } catch (e) { toast(e.message, 'err'); }
+
+/* ---------------- ESTADÍSTICAS POR DISTRITO ---------------- */
+var ESTAD = null;
+async function cargarEstadisticas(btn) {
+  await run(btn, async function () {
+    ESTAD = await apiT('estadisticasDistritos', { desde: val('#eDesde'), hasta: val('#eHasta'), distritoId: val('#eDist') });
+    var pct = function (v) { return v == null ? '—' : '<b style="color:' + (v >= 90 ? 'var(--verde)' : v >= 70 ? 'var(--ambar)' : 'var(--rojo)') + '">' + v + '%</b>'; };
+    var fila = function (r, tot) {
+      return '<tr' + (tot ? ' style="font-weight:800;background:var(--azul3)"' : '') + '><td>' + (tot ? 'TOTAL' : '<b>' + esc(r.distrito) + '</b><div class="small muted">' + esc(r.tipo || '') + '</div>') + '</td>' +
+        '<td>' + r.puntos + (r.puntos ? '<div class="small muted">' + r.puntosEnVia + ' sobre vía</div>' : '') + '</td>' +
+        '<td>' + r.mallasTotal + '</td><td>' + r.mallasVigentes + '</td><td>' + r.mallasFuturas + '</td><td>' + r.mallasFinalizadas + '</td><td>' + r.mallasEnRango + '</td>' +
+        '<td>' + r.policias + '</td><td>' + r.programadas + '</td><td style="color:var(--verde);font-weight:700">' + r.atrapadas + '</td>' +
+        '<td>' + (r.noCumplidas ? '<span class="nocump nocump-sm" style="margin:0">' + r.noCumplidas + '</span>' : '0') + '</td><td>' + r.pendientes + '</td><td>' + pct(r.pct) + '</td></tr>';
+    };
+    $('#eTabla').innerHTML = '<p class="small muted">Del ' + esc(ESTAD.desde) + ' al ' + esc(ESTAD.hasta) + ' (' + ESTAD.dias + ' días). Las monedas programadas cuentan cada moneda de cada policía por cada día de vigencia.</p>' +
+      '<div class="tbl-wrap"><table class="tbl"><thead><tr><th rowspan="2">Distrito / Servicio</th><th rowspan="2">Puntos establecidos</th><th colspan="5" style="text-align:center">Mallas establecidas</th><th rowspan="2">Policías activos</th><th colspan="5" style="text-align:center">Monedas en el rango</th></tr>' +
+      '<tr><th>Total</th><th>Vigentes hoy</th><th>Futuras</th><th>Finalizadas</th><th>En el rango</th><th>Programadas</th><th>Atrapadas</th><th>No cumplidas</th><th>Pendientes</th><th>Cumplimiento</th></tr></thead><tbody>' +
+      ESTAD.filas.map(function (r) { return fila(r); }).join('') + (ESTAD.filas.length > 1 ? fila(ESTAD.total, true) : '') + '</tbody></table></div>';
+  });
 }
-function verQR(id) {
-  var q = QRS.find(function (x) { return x.id === id; });
-  modal('QR N° ' + q.numero + ' · ' + q.nombre,
-    '<div class="qr-card"><div class="qr-num">QR ' + q.numero + '</div><div class="qr-name">' + esc(q.nombre) + '</div><div class="muted small">' + esc(q.distritoNombre) + (q.hora ? ' · ' + q.hora : '') + '</div>' +
-    '<div class="qr-box" id="qrBig"></div><div class="small muted" style="word-break:break-all">' + esc(urlQR(q)) + '</div></div>' +
-    '<div class="modal-foot"><button class="btn btn-danger" onclick="regenerarQR(\'' + id + '\')">↻ Regenerar código</button><button class="btn" onclick="descargarQR(\'' + id + '\')">⬇ PNG</button><button class="btn" onclick="cerrarModal()">Cerrar</button><button class="btn btn-primary" onclick="imprimirQRs([\'' + id + '\'])">🖨️ Imprimir</button></div>');
-  new QRCode($('#qrBig'), { text: urlQR(q), width: 280, height: 280, correctLevel: QRCode.CorrectLevel.M });
-}
-/** Descarga el QR como imagen PNG con número y nombre del lugar */
-function descargarQR(id) {
-  var q = QRS.find(function (x) { return x.id === id; });
-  var src = $('#qrBig canvas');
-  if (!src) { toast('Genere primero el QR.', 'err'); return; }
-  var W = 420, H = 540, c = document.createElement('canvas'); c.width = W; c.height = H;
-  var g = c.getContext('2d');
-  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
-  g.strokeStyle = '#0b2e6b'; g.lineWidth = 6; g.strokeRect(3, 3, W - 6, H - 6);
-  g.fillStyle = '#0b2e6b'; g.textAlign = 'center';
-  g.font = 'bold 40px Arial'; g.fillText('QR ' + q.numero, W / 2, 55);
-  g.font = 'bold 22px Arial'; g.fillText(q.nombre.slice(0, 32), W / 2, 88);
-  g.drawImage(src, 60, 110, 300, 300);
-  g.fillStyle = '#444'; g.font = '16px Arial'; g.fillText(q.distritoNombre.slice(0, 40), W / 2, 445);
-  g.font = '14px Arial'; g.fillText('Escanee con la cámara de su celular', W / 2, 475);
-  g.fillText('Código: ' + q.token, W / 2, 500);
-  var a = document.createElement('a');
-  a.href = c.toDataURL('image/png'); a.download = 'QR_' + q.numero + '_' + q.nombre.replace(/[^\w]+/g, '_') + '.png';
-  document.body.appendChild(a); a.click(); a.remove();
-}
-function imprimirSeleccionados() {
-  var ids = $$('.qchk').filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
-  if (!ids.length) { toast('Seleccione al menos un QR.', 'err'); return; }
-  imprimirQRs(ids);
-}
-function imprimirQRs(ids) {
-  var pa = $('#printArea');
-  var l = QRS.filter(function (q) { return ids.indexOf(q.id) > -1; });
-  pa.innerHTML = '<div class="qr-grid">' + l.map(function (q) {
-    return '<div class="qr-card"><div class="small muted">' + esc(CFG && USER ? (USER.distritoNombre || q.distritoNombre) : '') + '</div><div class="qr-num">QR ' + q.numero + '</div><div class="qr-name">' + esc(q.nombre) + '</div>' +
-      '<div class="qr-box" id="pq_' + q.id + '"></div><div class="small">Punto de control de patrullaje · ' + esc(q.distritoNombre) + '</div><div class="small muted">Escanee con la cámara de su celular · Código: ' + esc(q.token) + '</div></div>';
-  }).join('') + '</div>';
-  l.forEach(function (q) { new QRCode(document.getElementById('pq_' + q.id), { text: urlQR(q), width: 250, height: 250, correctLevel: QRCode.CorrectLevel.M }); });
-  document.body.classList.add('printing');
-  var fin = function () { document.body.classList.remove('printing'); window.removeEventListener('afterprint', fin); };
-  window.addEventListener('afterprint', fin);
-  setTimeout(function () { window.print(); setTimeout(fin, 1500); }, 500);
+function csvEstadisticas() {
+  if (!ESTAD) { toast('Primero consulte.', 'err'); return; }
+  var cols = [['distrito', 'Distrito'], ['puntos', 'Puntos'], ['puntosEnVia', 'Puntos sobre vía'], ['mallasTotal', 'Mallas total'], ['mallasVigentes', 'Mallas vigentes hoy'], ['mallasFuturas', 'Mallas futuras'], ['mallasFinalizadas', 'Mallas finalizadas'], ['mallasEnRango', 'Mallas en rango'], ['policias', 'Policías activos'], ['programadas', 'Monedas programadas'], ['atrapadas', 'Atrapadas'], ['noCumplidas', 'No cumplidas'], ['pendientes', 'Pendientes'], ['pct', 'Cumplimiento %']];
+  var csv = '﻿' + cols.map(function (c) { return c[1]; }).join(';') + '\n' + ESTAD.filas.concat([ESTAD.total]).map(function (r) { return cols.map(function (c) { return r[c[0]] == null ? '' : r[c[0]]; }).join(';'); }).join('\n');
+  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'estadisticas_distritos_' + ESTAD.desde + '_' + ESTAD.hasta + '.csv'; document.body.appendChild(a); a.click(); a.remove();
 }
 
 /* ---------------- MALLA OPERATIVA ---------------- */
@@ -489,11 +489,11 @@ async function formMalla(id) {
     '<div style="display:flex;align-items:flex-end"><label style="display:flex;gap:8px;align-items:center;color:var(--texto);font-size:14px;margin:0 0 10px"><input type="checkbox" id="mfFoto"' + (m.exigirFoto !== 'NO' ? ' checked' : '') + '> 📷 Exigir foto de evidencia (reto al azar)</label></div>' +
     '<div class="full"><label>Observación</label><input id="mfObs" value="' + esc(m.observacion) + '"></div>' +
     '</div>' +
-    '<div class="mt"><h3>Puntos QR en orden de escaneo</h3>' +
-    '<div class="add-qr"><div><label>Punto QR</label><select id="mfQr"></select></div>' +
-    '<div><label>Hora(s) en que debe escanearse <span style="color:var(--rojo)">*</span></label><div id="mfHoras" class="horas"></div></div>' +
+    '<div class="mt"><h3>Monedas de la malla (punto y hora)</h3>' +
+    '<div class="add-qr"><div><label>Punto</label><select id="mfQr"></select></div>' +
+    '<div><label>Hora(s) de la moneda <span style="color:var(--rojo)">*</span></label><div id="mfHoras" class="horas"></div></div>' +
     '<div style="align-self:end"><button class="btn btn-primary" onclick="agregarPuntoMF()">+ Agregar a la malla</button></div></div>' +
-    '<div class="row mb"><span class="small muted grow">La hora es obligatoria. Un mismo QR puede agregarse con varias horas. Los puntos se ordenan por hora automáticamente.</span><button class="btn btn-sm" onclick="if(MF.puntos.length&&confirm(\'¿Quitar todos los puntos?\')){MF.puntos=[];renderMFPuntos()}">Vaciar</button></div>' +
+    '<div class="row mb"><span class="small muted grow">La hora es obligatoria. Un mismo punto puede tener varias monedas a distintas horas. Se ordenan por hora automáticamente.</span><button class="btn btn-sm" onclick="if(MF.puntos.length&&confirm(\'¿Quitar todos los puntos?\')){MF.puntos=[];renderMFPuntos()}">Vaciar</button></div>' +
     '<div class="pt-list" id="mfPuntos"></div></div>' +
     '<div class="mt"><div id="mfMap" class="map map-sm"></div></div>' +
     '<p class="small muted mt">👥 El personal se asigna desde la pantalla <b>Usuarios</b> (o con el botón 👥 de la malla).</p>' +
@@ -510,13 +510,13 @@ async function cargarMFDistrito(dId) {
     MF.qrs = await apiT('qrsListar', { distritoId: dId });
     var ids = MF.qrs.map(function (q) { return q.id; });
     MF.puntos = MF.puntos.filter(function (p) { return ids.indexOf(p.qrId) > -1; });
-    $('#mfQr').innerHTML = MF.qrs.map(function (q) { return '<option value="' + q.id + '">QR ' + q.numero + ' · ' + esc(q.nombre) + (q.hora ? ' (' + q.hora + ')' : '') + '</option>'; }).join('') || '<option value="">No hay QR en este distrito</option>';
+    $('#mfQr').innerHTML = MF.qrs.map(function (q) { return '<option value="' + q.id + '">' + q.numero + ' · ' + esc(q.nombre) + '</option>'; }).join('') || '<option value="">No hay puntos en este distrito</option>';
     $('#mfQr').onchange = function () { var q = MF.qrs.find(function (x) { return x.id === val('#mfQr'); }); MF.horasAdd = [q && q.hora ? q.hora : '']; renderHorasAdd(); };
     $('#mfQr').onchange();
     renderMFPuntos();
   } catch (e) { if (!e.silent) toast(e.message, 'err'); }
 }
-/* Horas a agregar para el QR seleccionado (una o varias, mínimo una) */
+/* Horas a agregar para el punto seleccionado (una o varias, mínimo una) */
 function renderHorasAdd() {
   var h = MF.horasAdd && MF.horasAdd.length ? MF.horasAdd : [''];
   $('#mfHoras').innerHTML = h.map(function (x, i) {
@@ -534,10 +534,10 @@ function agregarPuntoMF() {
   if (!horas.length) { toast('Ingrese al menos una hora para el punto.', 'err'); $('#mfHoras input').focus(); return; }
   var q = MF.qrs.find(function (x) { return x.id === id; });
   var rep = horas.filter(function (h) { return MF.puntos.some(function (p) { return p.qrId === id && p.hora === h; }); });
-  if (rep.length) { toast('QR ' + q.numero + ' ya está en la malla a las ' + rep.join(', ') + '.', 'err'); return; }
+  if (rep.length) { toast(q.nombre + ' ya tiene moneda a las ' + rep.join(', ') + '.', 'err'); return; }
   horas.forEach(function (h) { MF.puntos.push({ qrId: id, hora: h }); });
   ordenarPuntosMF(); MF.horasAdd = ['']; renderHorasAdd(); renderMFPuntos();
-  toast('QR ' + q.numero + ' agregado ' + (horas.length > 1 ? horas.length + ' veces' : 'a las ' + horas[0]) + '.', 'ok');
+  toast(q.nombre + ': ' + horas.length + (horas.length > 1 ? ' monedas agregadas.' : ' moneda agregada a las ' + horas[0] + '.'), 'ok');
 }
 function quitarPuntoMF(i) { MF.puntos.splice(i, 1); renderMFPuntos(); }
 function cambiarHoraMF(i, v) { MF.puntos[i].hora = v; ordenarPuntosMF(); renderMFPuntos(); }
@@ -545,7 +545,7 @@ function renderMFPuntos() {
   var qm = {}; MF.qrs.forEach(function (q) { qm[q.id] = q; });
   $('#mfPuntos').innerHTML = MF.puntos.map(function (p, i) {
     var q = qm[p.qrId] || { numero: '?', nombre: '(no disponible)' };
-    return '<div class="pt"><span class="num-icon"><span style="background:var(--azul)">' + (i + 1) + '</span></span><div><b>QR ' + q.numero + '</b> ' + esc(q.nombre) + '</div>' +
+    return '<div class="pt"><span class="num-icon"><span style="background:var(--azul)">' + (i + 1) + '</span></span><div>🪙 <b>' + esc(q.nombre) + '</b> <span class="small muted">punto ' + q.numero + '</span></div>' +
       '<input type="time" required value="' + esc(p.hora) + '" style="' + (p.hora ? '' : 'border:2px solid var(--rojo);background:#fde2e2') + '" onchange="cambiarHoraMF(' + i + ', this.value)">' +
       '<div class="acciones"><button class="btn btn-sm btn-danger" title="Quitar" onclick="quitarPuntoMF(' + i + ')">✕</button></div></div>';
   }).join('') || '<div class="muted small">Agregue los puntos en el orden en que deben escanearse.</div>';
@@ -557,7 +557,7 @@ function renderMFPuntos() {
       var q = qm[p.qrId]; if (!q) return;
       line.push([q.lat, q.lng]);
       MF.capa.add(gmCirculo(q.lat, q.lng, CFG.radio, '#1a4fa3', .25));
-      MF.capa.add(gmNum(MF.map, q.lat, q.lng, i + 1, '#0b2e6b', null, 'QR ' + q.numero + ' ' + q.nombre + ' ' + (p.hora || '')));
+      MF.capa.add(gmNum(MF.map, q.lat, q.lng, i + 1, '#0b2e6b', null, q.nombre + ' ' + (p.hora || '')));
     });
     if (line.length > 1) MF.capa.add(gmLinea(line, '#1a4fa3', 3, false, true));
     MF.capa.setMap(MF.map);
@@ -566,8 +566,8 @@ function renderMFPuntos() {
   }
 }
 async function guardarMalla() {
-  if (!MF.puntos.length) { toast('Agregue al menos un punto QR con su hora.', 'err'); return; }
-  if (MF.puntos.some(function (p) { return !p.hora; })) { toast('Todos los puntos deben tener hora (marcados en rojo).', 'err'); return; }
+  if (!MF.puntos.length) { toast('Agregue al menos una moneda (punto y hora).', 'err'); return; }
+  if (MF.puntos.some(function (p) { return !p.hora; })) { toast('Todas las monedas deben tener hora (marcadas en rojo).', 'err'); return; }
   await run($('#mfBtn'), async function () {
     var r = await apiT('mallaGuardar', {
       id: MF.id, nombre: val('#mfNom'), fecha: val('#mfFecha'), fechaHasta: val('#mfHasta'), distritoId: esSuper() ? val('#mfDist') : USER.distritoId,
@@ -592,7 +592,7 @@ async function verCumplimiento(id, dia) {
     var c = await apiT('mallaCumplimiento', id, dia || '');
     var cols = ['Orden', 'Punto', 'Hora / ventana'].concat(c.columnas.map(function (x) { return esc(x.nombre); }));
     var filas = c.filas.map(function (f) {
-      return ['<b>' + f.orden + '</b>', '<b>QR ' + f.qrNumero + '</b> ' + esc(f.qrNombre), '<b>' + esc(f.hora) + '</b><div class="small muted">' + esc(f.desde) + '–' + esc(f.hasta) + '</div>'].concat(c.columnas.map(function (col) { return celdaCumpl(f.celdas[col.id], col.id === 'GRUPO'); }));
+      return ['<b>' + f.orden + '</b>', '🪙 <b>' + esc(f.qrNombre) + '</b> <span class="small muted">P' + f.qrNumero + '</span>', '<b>' + esc(f.hora) + '</b><div class="small muted">' + esc(f.desde) + '–' + esc(f.hasta) + '</div>'].concat(c.columnas.map(function (col) { return celdaCumpl(f.celdas[col.id], col.id === 'GRUPO'); }));
     });
     var vig = c.malla.fecha === c.malla.fechaHasta ? c.malla.fecha : c.malla.fecha + ' a ' + c.malla.fechaHasta;
     modal('Cumplimiento · ' + c.malla.nombre,
@@ -696,8 +696,8 @@ async function pdfMalla(id, btn) {
     var y = doc.lastAutoTable.finalY + 6;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor.apply(doc, azul); doc.text('PUNTOS Y HORARIOS (en orden de escaneo)', 14, y);
     doc.autoTable({
-      startY: y + 3, head: [['Orden', 'QR', 'Lugar', 'Hora', 'Ubicación']],
-      body: o.puntos.map(function (p) { return [p.orden, 'QR ' + p.qrNumero, p.qrNombre + (p.descripcion ? '\n' + p.descripcion : ''), p.hora || 'Libre', 'Abrir mapa']; }),
+      startY: y + 3, head: [['Orden', 'Punto', 'Lugar (moneda)', 'Hora', 'Ubicación']],
+      body: o.puntos.map(function (p) { return [p.orden, 'N° ' + p.qrNumero, p.qrNombre + (p.descripcion ? '\n' + p.descripcion : ''), p.hora || 'Libre', 'Abrir mapa']; }),
       headStyles: { fillColor: azul, fontSize: 10 }, styles: { fontSize: 10, cellPadding: 2.2, valign: 'middle' },
       columnStyles: { 0: { halign: 'center', cellWidth: 16, fontStyle: 'bold' }, 1: { cellWidth: 18, fontStyle: 'bold' }, 3: { halign: 'center', cellWidth: 20, fontStyle: 'bold' }, 4: { cellWidth: 26, textColor: [26, 79, 163] } },
       margin: { left: 14, right: 14 },
@@ -717,9 +717,9 @@ async function pdfMalla(id, btn) {
     });
     // Instrucciones
     y = doc.lastAutoTable.finalY + 8;
-    var inst = ['1. Escanee cada código QR con la app de patrullaje, en el orden y la hora indicados.',
-      '2. Presione "Activar GPS": debe estar físicamente junto al QR (máx. ' + (CFG.geocerca || 50) + ' m) o el punto quedará NO VÁLIDO.',
-      m.exigirFoto !== 'NO' ? '3. Tome la foto de evidencia que le pida la app (en vivo, dirección elegida al azar).' : '',
+    var inst = ['1. Abra la app de patrullaje: verá sus monedas del día (con su grado y nombre) en el mapa.',
+      '2. Llegue a cada moneda en su hora (± ' + m.tolerancia + ' min). Antes de la hora la moneda se ve opaca y no se puede atrapar.',
+      '3. A menos de ' + (CFG.geocerca || 30) + ' m, abra la cámara, gire hacia la dirección indicada y toque la moneda (se toma la foto de evidencia).',
       'App de patrullaje: ' + (APP_URL || '')].filter(Boolean);
     if (y > 260) { doc.addPage(); y = 20; }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(29, 36, 51); doc.text('INSTRUCCIONES', 14, y);
@@ -904,7 +904,7 @@ async function eliminarDistrito(id) {
   try { toast(await apiT('distritoEliminar', id), 'ok'); await cargarDistritos(); refrescarSelectsDistrito(); } catch (e) { toast(e.message, 'err'); }
 }
 function refrescarSelectsDistrito() {
-  ['#dDist', '#mDist', '#cDist', '#maDist', '#qDist', '#uDist', '#rDist'].forEach(function (s) { var v = val(s); $(s).innerHTML = opcionesDistrito(v, true); $(s).value = v; });
+  ['#dDist', '#mDist', '#cDist', '#maDist', '#qDist', '#uDist', '#rDist', '#eDist'].forEach(function (s) { var v = val(s); $(s).innerHTML = opcionesDistrito(v, true); $(s).value = v; });
 }
 
 /* ---------------- REPORTES ---------------- */
