@@ -91,10 +91,11 @@
       <button data-sec="mapa"><span class="ico">🗺️</span>Mapa de escaneos</button>
       <button data-sec="cobertura"><span class="ico">🎯</span>Rutas y cobertura</button>
       <button data-sec="mallas"><span class="ico">📅</span>Malla operativa</button>
-      <button data-sec="qrs"><span class="ico">🔳</span>Puntos QR</button>
+      <button data-sec="qrs"><span class="ico">🪙</span>Puntos (monedas)</button>
       <button data-sec="usuarios"><span class="ico">👮</span>Usuarios</button>
       <button data-sec="distritos" data-super="1"><span class="ico">🏢</span>Distritos / Servicios</button>
-      <button data-sec="reportes"><span class="ico">📋</span>Reporte de escaneos</button>
+      <button data-sec="estadisticas"><span class="ico">📈</span>Estadísticas por distrito</button>
+      <button data-sec="reportes"><span class="ico">📋</span>Reporte de monedas</button>
       <button data-sec="cuenta"><span class="ico">⚙️</span>Mi cuenta</button>
     </nav>
   </aside>
@@ -156,14 +157,13 @@
       <div id="maTabla"></div>
     </section>
 
-    <!-- QRS -->
+    <!-- PUNTOS (MONEDAS) -->
     <section id="s-qrs" class="sec" hidden>
       <div class="filters">
         <div data-only-super><label>Distrito / Servicio</label><select id="qDist" onchange="cargarQRs()"></select></div>
         <div><label>Buscar</label><input id="qBuscar" placeholder="Número o nombre" oninput="renderQRs()"></div>
         <div class="grow"></div>
-        <button class="btn" onclick="imprimirSeleccionados()">🖨️ Imprimir seleccionados</button>
-        <button class="btn btn-primary" onclick="formQR()">+ Nuevo QR</button>
+        <button class="btn btn-primary" onclick="formQR()">+ Nuevo punto</button>
       </div>
       <div id="qTabla"></div>
     </section>
@@ -192,6 +192,18 @@
     <section id="s-distritos" class="sec" hidden>
       <div class="filters"><div class="grow"></div><button class="btn btn-primary" onclick="formDistrito()">+ Nuevo</button></div>
       <div id="diTabla"></div>
+    </section>
+
+    <!-- ESTADÍSTICAS -->
+    <section id="s-estadisticas" class="sec" hidden>
+      <div class="filters">
+        <div><label>Desde</label><input type="date" id="eDesde"></div>
+        <div><label>Hasta</label><input type="date" id="eHasta"></div>
+        <div data-only-super><label>Distrito / Servicio</label><select id="eDist"></select></div>
+        <button class="btn btn-primary" onclick="cargarEstadisticas(this)">Consultar</button>
+        <button class="btn" onclick="csvEstadisticas()">⬇ CSV (Excel)</button>
+      </div>
+      <div id="eTabla"><div class="card muted center">Elija el rango de fechas y presione Consultar.</div></div>
     </section>
 
     <!-- REPORTES -->
@@ -234,9 +246,9 @@
 <div id="toast"></div>
 <div id="printArea"></div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="js/config.js"></script>
 <script src="js/comun.js"></script>
+<script src="js/moneda.js"></script>
 <script src="js/panel.js"></script>
 </body>
 </html>

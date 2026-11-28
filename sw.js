@@ -1,6 +1,6 @@
 /* Service worker: permite instalar la app y carga rápida. Siempre intenta la red primero. */
-var CACHE = 'patrullaje-v5';
-var ARCHIVOS = ['./', './index.html', './panel.html', './css/estilos.css', './js/config.js', './js/comun.js', './js/policia.js', './js/panel.js', './manifest.json', './icons/icon-192.png'];
+var CACHE = 'patrullaje-v6';
+var ARCHIVOS = ['./', './index.html', './panel.html', './css/estilos.css', './js/config.js', './js/comun.js', './js/moneda.js', './js/policia.js', './js/panel.js', './manifest.json', './icons/icon-192.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ARCHIVOS); }).catch(function () { }));
